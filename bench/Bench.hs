@@ -23,6 +23,12 @@ data Acc = Acc {-# UNPACK #-} !Double {-# UNPACK #-} !Double
 data Hp = Hp Int
   deriving (Eq, Show)
 
+data UiMsg
+  = Hover Int
+  | Focus Bool
+  | Noise
+  deriving (Eq, Show)
+
 data C
   = CPos Pos
   | CVel Vel
@@ -40,6 +46,9 @@ type Graph msg = S.Graph C msg
 
 batch :: S.Batch C String a -> S.Batch C String a
 batch = id
+
+batchUi :: S.Batch C UiMsg a -> S.Batch C UiMsg a
+batchUi = id
 
 reqPV :: E.Sig
 reqPV =
@@ -295,6 +304,44 @@ graphVampire =
     _ <- S.program vampireProg
     pure ()
 
+pickHover :: UiMsg -> Maybe Int
+pickHover msg =
+  case msg of
+    Hover n -> Just n
+    _ -> Nothing
+
+pickFocus :: UiMsg -> Maybe Bool
+pickFocus msg =
+  case msg of
+    Focus ok -> Just ok
+    _ -> Nothing
+
+stickyInlineProg :: ProgramM UiMsg ()
+stickyInlineProg = do
+  score <- S.await $
+    (\hoverId focused -> if focused then hoverId else hoverId * 10)
+      <$> S.sticky pickHover
+      <*> S.sticky pickFocus
+  _ <- S.await $ batchUi $
+    S.each @Hp $ \_ ->
+      S.set (Hp score)
+  pure ()
+
+graphStickyInline :: Graph UiMsg
+graphStickyInline =
+  S.graph $ do
+    _ <- S.program stickyInlineProg
+    pure ()
+
+runStickyInline :: World -> Int
+runStickyInline w0 =
+  let (_, w1) = E.spawn (Hp 0) w0
+      (w2, _, g1) = S.run 0.016 w1 [Hover 4, Noise] graphStickyInline
+      (w3, _, _) = S.run 0.016 w2 [Focus False] g1
+  in case E.getr @Hp w3 of
+      Just (Hp n) -> n
+      Nothing -> 0
+
 main :: IO ()
 main = defaultMain
   [ bgroup "game"
@@ -322,5 +369,9 @@ main = defaultMain
             let (w1, _, _) = S.run 0.016 w0 [] graphVampire
             in forceEachm w1
           ) w
+      ]
+  , bgroup "program/sticky"
+      [ let w = E.emptyWorld
+        in bench "inline-await" $ nf runStickyInline w
       ]
   ]

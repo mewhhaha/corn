@@ -99,6 +99,7 @@ main = do
   assert "await sticky same-frame merge" program_await_sticky_same_frame
   assert "await sticky across frames" program_await_sticky_across_frames
   assert "await sticky first match" program_await_sticky_first_match
+  assert "await sticky inline applicative" program_await_sticky_inline_applicative
   assert "replay from inputs" program_replay_from_inputs
   assert "snapshot roundtrip (replay-backed graph)" program_snapshot_roundtrip
 

@@ -17,6 +17,7 @@ module ProgramProps
   , program_await_sticky_same_frame
   , program_await_sticky_across_frames
   , program_await_sticky_first_match
+  , program_await_sticky_inline_applicative
   , program_replay_from_inputs
   , program_snapshot_roundtrip
   , prop_program_resume
@@ -183,6 +184,25 @@ program_await_sticky_first_match =
           pure ()
       (w1, _, _) = S.run 0.1 (E.emptyWorld :: World) [Hover 1, Hover 2, Focus True] g0
   in E.getr @(Int, Bool) w1 == Just (1, True)
+
+program_await_sticky_inline_applicative :: Bool
+program_await_sticky_inline_applicative =
+  let prog :: ProgramM UiMsg ()
+      prog = do
+        score <- S.await $
+          (\hoverId focused -> if focused then hoverId else hoverId * 10)
+            <$> S.sticky pickHover
+            <*> S.sticky pickFocus
+        S.world (S.put score)
+      g0 :: Graph UiMsg
+      g0 =
+        S.graph $ do
+          _ <- S.program prog
+          pure ()
+      (w1, _, g1) = S.run 0.1 (E.emptyWorld :: World) [Hover 4, Noise] g0
+      (w2, _, _) = S.run 0.1 w1 [Focus False] g1
+  in E.getr @Int w1 == Nothing
+      && E.getr @Int w2 == Just 40
 
 program_resume_once :: Bool
 program_resume_once =
