@@ -3,8 +3,8 @@
 Small, pure data layer for game engines with a minimal FRP core and a tiny ECS.
 Pattern name: **ECP** (Entity‑Component‑Program). The API is intentionally simple and favors short, single‑word names.
 
-See `docs/first-principles.md` for the core model and runtime semantics.
-See `docs/invariants.md` for runtime/domain invariants and performance guardrails.
+See `skills/corn-engine-docs/references/first-principles.md` for the core model and runtime semantics.
+See `skills/corn-engine-docs/references/invariants.md` for runtime/domain invariants and performance guardrails.
 
 Suggested imports (to avoid name clashes with Prelude):
 
@@ -1706,13 +1706,13 @@ questGraph =
 - No built-in IO/async runtime: `Job`/`Events` are data only; you need an external executor.
 - Program graph shares an inbox snapshot per round, but world updates are applied in list order; ordering affects visibility and patch merge.
 - Patch conflicts are resolved by list order; no merge policy beyond `Semigroup` order.
-- Waiting programs are re-run within a frame; misbehaving programs can loop forever.
+- Event waits return matching event lists, not single-event consume semantics.
+- `await Update` is a seen-barrier, not a "everything fully finished" barrier.
+- `await <batch>` is only valid in `ProgramM`; using it in `EntityM` is a runtime error.
 - `QueryableSum` skips signature pruning; sum queries scan all entities.
-- Queries are applicative; no dependent queries without giving up pruning.
+- Dependent queries are possible (`Monad`/`Alternative`), but those compositions drop signature pruning and may force full scans.
 - No spatial index; collision queries are naive unless you build your own structure.
-- `Events` are plain lists: no timestamps, priorities, or guaranteed ordering across programs.
-- Long-running `Step`s require manual state hygiene; no built-in garbage collection for events.
+- `Events` are plain lists: order follows evaluation order, but there are no timestamps or priorities.
+- Long-running `Step` state lives in program/entity locals; lifecycle cleanup is mostly manual.
 - Coroutine programs aren’t serializable as data; mid-flight saves require input logging/replay.
-- Relative timers are event-driven; there’s no first-class clock scaling/pausing per program.
-- No prefab/archetype registry; bundles are just ad‑hoc values without tooling.
-- `progress` clamps; `range` is windowed—users need to learn the distinction.
+- `progress` clamps while `range`/`window` are nullable windows; mixing them can introduce subtle logic bugs.

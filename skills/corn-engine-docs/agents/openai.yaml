@@ -1,0 +1,4 @@
+interface:
+  display_name: "Corn Engine Docs"
+  short_description: "Corn runtime invariants and expectations guide."
+  default_prompt: "Explain Corn runtime behavior with code-anchored guidance and clear good vs bad examples."

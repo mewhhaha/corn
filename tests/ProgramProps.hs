@@ -14,15 +14,19 @@ module ProgramProps
   , program_compute_fused_order
   , program_collect_fused_order
   , program_event_chain
+  , program_replay_from_inputs
+  , program_snapshot_roundtrip
   , prop_program_resume
   , prop_program_await_value
+  , prop_program_replay_from_inputs
+  , prop_program_snapshot_roundtrip
   , prop_program_patch_identity
   , prop_program_patch_assoc
   , prop_program_collect_fused
   ) where
 
 import Control.Exception (bracket)
-import Data.List (foldl')
+import Data.List (foldl', sortOn)
 import GHC.Generics (Generic)
 import GHC.Conc (getNumCapabilities, setNumCapabilities)
 import qualified Engine.Data.ECS as E
@@ -470,8 +474,54 @@ expectedValue evs =
       let (ph', delta) = stepPhase ph ev
       in (ph', acc + delta)
 
-runFrames :: [Bool] -> Int
-runFrames evs =
+newtype ReplayGraphSnap = ReplayGraphSnap
+  { rgsInputs :: [Bool]
+  } deriving (Eq, Show, Read)
+
+newtype ReplayWorldSnap = ReplayWorldSnap
+  { rwsInts :: [(Int, Int)]
+  } deriving (Eq, Show, Read)
+
+data ReplayCheckpoint = ReplayCheckpoint
+  { rcWorld :: ReplayWorldSnap
+  , rcGraph :: ReplayGraphSnap
+  } deriving (Eq, Show, Read)
+
+encodeCheckpoint :: ReplayCheckpoint -> String
+encodeCheckpoint = show
+
+decodeCheckpoint :: String -> Maybe ReplayCheckpoint
+decodeCheckpoint raw =
+  case reads raw of
+    [(checkpoint, "")] -> Just checkpoint
+    _ -> Nothing
+
+snapshotWorldInts :: World -> ReplayWorldSnap
+snapshotWorldInts w =
+  let pairs =
+        map
+          (\(ent, v) -> (E.eid ent, v))
+          (E.runq (E.comp @Int) w)
+  in ReplayWorldSnap (sortOn fst pairs)
+
+restoreWorldInts :: ReplayWorldSnap -> Maybe World
+restoreWorldInts (ReplayWorldSnap pairs0) =
+  let pairs = sortOn fst pairs0
+      ids = map fst pairs
+      expected = [0 .. length pairs - 1]
+      spawnOne w (_, v) = snd (E.spawn v w)
+  in if ids /= expected
+      then Nothing
+      else Just (foldl' spawnOne (E.emptyWorld :: World) pairs)
+
+restoreGraphFromReplay :: ReplayGraphSnap -> Graph String
+restoreGraphFromReplay (ReplayGraphSnap evs) =
+  let (_, w0, g0) = resumeFixture
+      (_, g') = runInputFrames evs (w0, g0)
+  in g'
+
+resumeFixture :: (E.Entity, World, Graph String)
+resumeFixture =
   let (e, w0) = E.spawn (0 :: Int) (E.emptyWorld :: World)
       sys :: ProgramM String ()
       sys = do
@@ -488,18 +538,119 @@ runFrames evs =
         S.graph $ do
           _ <- S.program sys
           pure ()
-      step (w, g) ev =
-        let inbox = if ev then ["go"] else []
-            (w', _, g') = S.run 0.1 w inbox g
-        in (w', g')
-      (wf, _) = foldl' step (w0, g0) evs
-  in case E.get @Int e wf of
-      Nothing -> 0
-      Just v -> v
+  in (e, w0, g0)
+
+runInputFrames :: [Bool] -> (World, Graph String) -> (World, Graph String)
+runInputFrames evs wg0 = foldl' step wg0 evs
+  where
+    step (w, g) ev =
+      let inbox = if ev then ["go"] else []
+          (w', _, g') = S.run 0.1 w inbox g
+      in (w', g')
+
+readCounter :: E.Entity -> World -> Int
+readCounter e w =
+  case E.get @Int e w of
+    Nothing -> 0
+    Just v -> v
+
+runFrames :: [Bool] -> Int
+runFrames evs =
+  let (e, w0, g0) = resumeFixture
+      (wf, _) = runInputFrames evs (w0, g0)
+  in readCounter e wf
+
+program_replay_from_inputs :: Bool
+program_replay_from_inputs =
+  let evs = [False, True, False, False, True, False, True]
+      splitIx = 4
+      (e, w0, g0) = resumeFixture
+      (wDirect, _) = runInputFrames evs (w0, g0)
+      prefix = take splitIx evs
+      suffix = drop splitIx evs
+      (wSave, _) = runInputFrames prefix (w0, g0)
+      (wRebuilt, gRebuilt) = runInputFrames prefix (w0, g0)
+      (wReplay, _) = runInputFrames suffix (wRebuilt, gRebuilt)
+  in readCounter e wSave == readCounter e wRebuilt
+      && readCounter e wReplay == readCounter e wDirect
+
+program_snapshot_roundtrip :: Bool
+program_snapshot_roundtrip =
+  let evs = [False, True, False, False, True, False, True]
+      splitIx = 4
+      prefix = take splitIx evs
+      suffix = drop splitIx evs
+      (e, w0, g0) = resumeFixture
+      (wAtSave, _) = runInputFrames prefix (w0, g0)
+      (wDirect, _) = runInputFrames evs (w0, g0)
+      checkpoint =
+        ReplayCheckpoint
+          { rcWorld = snapshotWorldInts wAtSave
+          , rcGraph = ReplayGraphSnap prefix
+          }
+      encoded = encodeCheckpoint checkpoint
+  in case decodeCheckpoint encoded of
+      Nothing -> False
+      Just decoded ->
+        case restoreWorldInts (rcWorld decoded) of
+          Nothing -> False
+          Just wRestored ->
+            let gRestored = restoreGraphFromReplay (rcGraph decoded)
+                (wReplay, _) = runInputFrames suffix (wRestored, gRestored)
+            in readCounter e wRestored == readCounter e wAtSave
+                && readCounter e wReplay == readCounter e wDirect
 
 prop_program_resume :: [Bool] -> Bool
 prop_program_resume evs =
   runFrames evs == expectedValue evs
+
+prop_program_replay_from_inputs :: [Bool] -> Int -> Bool
+prop_program_replay_from_inputs evs0 split0 =
+  let evs = take 16 evs0
+      maxIx = length evs
+      splitIx =
+        if maxIx == 0
+          then 0
+          else abs split0 `mod` (maxIx + 1)
+      prefix = take splitIx evs
+      suffix = drop splitIx evs
+      (e, w0, g0) = resumeFixture
+      (wDirect, _) = runInputFrames evs (w0, g0)
+      (wSave, _) = runInputFrames prefix (w0, g0)
+      (wRebuilt, gRebuilt) = runInputFrames prefix (w0, g0)
+      (wReplay, _) = runInputFrames suffix (wRebuilt, gRebuilt)
+  in readCounter e wSave == readCounter e wRebuilt
+      && readCounter e wReplay == readCounter e wDirect
+
+prop_program_snapshot_roundtrip :: [Bool] -> Int -> Bool
+prop_program_snapshot_roundtrip evs0 split0 =
+  let evs = take 16 evs0
+      maxIx = length evs
+      splitIx =
+        if maxIx == 0
+          then 0
+          else abs split0 `mod` (maxIx + 1)
+      prefix = take splitIx evs
+      suffix = drop splitIx evs
+      (e, w0, g0) = resumeFixture
+      (wAtSave, _) = runInputFrames prefix (w0, g0)
+      (wDirect, _) = runInputFrames evs (w0, g0)
+      checkpoint =
+        ReplayCheckpoint
+          { rcWorld = snapshotWorldInts wAtSave
+          , rcGraph = ReplayGraphSnap prefix
+          }
+      encoded = encodeCheckpoint checkpoint
+  in case decodeCheckpoint encoded of
+      Nothing -> False
+      Just decoded ->
+        case restoreWorldInts (rcWorld decoded) of
+          Nothing -> False
+          Just wRestored ->
+            let gRestored = restoreGraphFromReplay (rcGraph decoded)
+                (wReplay, _) = runInputFrames suffix (wRestored, gRestored)
+            in readCounter e wRestored == readCounter e wAtSave
+                && readCounter e wReplay == readCounter e wDirect
 
 prop_program_await_value :: Int -> Bool
 prop_program_await_value v =

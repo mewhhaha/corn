@@ -96,6 +96,8 @@ main = do
   assert "compute fused order" program_compute_fused_order
   assert "compute fused collect order" program_collect_fused_order
   assert "event chain" program_event_chain
+  assert "replay from inputs" program_replay_from_inputs
+  assert "snapshot roundtrip (replay-backed graph)" program_snapshot_roundtrip
 
   results <-
     sequence
@@ -122,6 +124,8 @@ main = do
       , quickCheckResult prop_transform_inverse
       , quickCheckResult prop_program_resume
       , quickCheckResult prop_program_await_value
+      , quickCheckResult prop_program_replay_from_inputs
+      , quickCheckResult prop_program_snapshot_roundtrip
       , quickCheckResult prop_program_patch_identity
       , quickCheckResult prop_program_patch_assoc
       , quickCheckResult prop_program_collect_fused
