@@ -14,6 +14,9 @@ module ProgramProps
   , program_compute_fused_order
   , program_collect_fused_order
   , program_event_chain
+  , program_await_sticky_same_frame
+  , program_await_sticky_across_frames
+  , program_await_sticky_first_match
   , program_replay_from_inputs
   , program_snapshot_roundtrip
   , prop_program_resume
@@ -38,6 +41,12 @@ data WaitGo
 data Speed
 data Use
 data Marker = Marker
+  deriving (Eq, Show)
+
+data UiMsg
+  = Hover Int
+  | Focus Bool
+  | Noise
   deriving (Eq, Show)
 
 newtype Count = Count Int
@@ -115,6 +124,65 @@ runCollectGraph w0 =
             S.send [counts]
           pure ()
   in S.run 0.1 w0 [] g0
+
+pickHover :: UiMsg -> Maybe Int
+pickHover msg =
+  case msg of
+    Hover n -> Just n
+    _ -> Nothing
+
+pickFocus :: UiMsg -> Maybe Bool
+pickFocus msg =
+  case msg of
+    Focus ok -> Just ok
+    _ -> Nothing
+
+stickyUiPair :: S.Sticky UiMsg (Int, Bool)
+stickyUiPair = (,) <$> S.sticky pickHover <*> S.sticky pickFocus
+
+program_await_sticky_same_frame :: Bool
+program_await_sticky_same_frame =
+  let prog :: ProgramM UiMsg ()
+      prog = do
+        pair <- S.await stickyUiPair
+        S.world (S.put pair)
+      g0 :: Graph UiMsg
+      g0 =
+        S.graph $ do
+          _ <- S.program prog
+          pure ()
+      (w1, _, _) = S.run 0.1 (E.emptyWorld :: World) [Noise, Hover 3, Focus True] g0
+  in E.getr @(Int, Bool) w1 == Just (3, True)
+
+program_await_sticky_across_frames :: Bool
+program_await_sticky_across_frames =
+  let prog :: ProgramM UiMsg ()
+      prog = do
+        pair <- S.await stickyUiPair
+        S.world (S.put pair)
+      g0 :: Graph UiMsg
+      g0 =
+        S.graph $ do
+          _ <- S.program prog
+          pure ()
+      (w1, _, g1) = S.run 0.1 (E.emptyWorld :: World) [Hover 9] g0
+      (w2, _, _) = S.run 0.1 w1 [Noise, Focus False] g1
+  in E.getr @(Int, Bool) w1 == Nothing
+      && E.getr @(Int, Bool) w2 == Just (9, False)
+
+program_await_sticky_first_match :: Bool
+program_await_sticky_first_match =
+  let prog :: ProgramM UiMsg ()
+      prog = do
+        pair <- S.await stickyUiPair
+        S.world (S.put pair)
+      g0 :: Graph UiMsg
+      g0 =
+        S.graph $ do
+          _ <- S.program prog
+          pure ()
+      (w1, _, _) = S.run 0.1 (E.emptyWorld :: World) [Hover 1, Hover 2, Focus True] g0
+  in E.getr @(Int, Bool) w1 == Just (1, True)
 
 program_resume_once :: Bool
 program_resume_once =

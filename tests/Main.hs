@@ -96,6 +96,9 @@ main = do
   assert "compute fused order" program_compute_fused_order
   assert "compute fused collect order" program_collect_fused_order
   assert "event chain" program_event_chain
+  assert "await sticky same-frame merge" program_await_sticky_same_frame
+  assert "await sticky across frames" program_await_sticky_across_frames
+  assert "await sticky first match" program_await_sticky_first_match
   assert "replay from inputs" program_replay_from_inputs
   assert "snapshot roundtrip (replay-backed graph)" program_snapshot_roundtrip
 

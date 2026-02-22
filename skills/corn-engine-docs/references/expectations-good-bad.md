@@ -185,16 +185,16 @@ Why:
 Type: `Invariant`
 
 Expectation:
-- `await <batch>` is valid in `ProgramM` and invalid in `EntityM`.
+- `await <batch>` is valid in `ProgramM` and not available from `EntityM`.
 
 Good:
-- Run `await` on batches at program scope, then apply per-entity edits inside that batch.
+- Run `await` on a batch at program scope, then apply per-entity edits inside that batch.
 
 Bad:
 - Call `await` on a batch from inside `eachM` entity code.
 
 Why:
-- Entity-level `await BatchWait` raises a runtime error by design.
+- Batch waits are exposed as a `ProgramM`-only operation, so invalid `EntityM` usage fails at compile time.
 
 ## 12) Step State Keying Is Callsite-Sensitive
 
@@ -211,6 +211,24 @@ Bad:
 
 Why:
 - Distinct callsites create distinct state slots, which can diverge unexpectedly.
+
+## 13) Sticky Applicative Event Waits
+
+Type: `Expectation`
+
+Expectation:
+- Use `await` with `sticky` leaves to accumulate multiple event outcomes across frames.
+
+Good:
+- Combine hover/focus extraction applicatively:
+  - `(,) <$> sticky hoverMatch <*> sticky focusMatch`
+  - `await` resumes once both sides have values.
+
+Bad:
+- Chain `await` calls and expect the second one to remember a value seen in an earlier frame.
+
+Why:
+- Plain predicate waits are sequential per gate; sticky applicative waits store partial matches until all branches are ready.
 
 ## Add New Cases
 

@@ -885,6 +885,22 @@ g0 =
 -- The returned outbox is the aggregate of all messages emitted this frame.
 ```
 
+### 4a) Sticky merge of multiple event outcomes
+
+`await` supports sticky applicative event waits.
+Results stick across frames until all branches are satisfied.
+
+```haskell
+data Msg = Hover Int | Focus Bool | Other deriving (Eq, Show)
+
+uiProg :: ProgramM Msg ()
+uiProg = do
+  (hoverId, focused) <- S.await $
+    (,) <$> S.sticky (\m -> case m of Hover i -> Just i; _ -> Nothing)
+        <*> S.sticky (\m -> case m of Focus f -> Just f; _ -> Nothing)
+  S.world (S.put (hoverId, focused))
+```
+
 ### 4b) Movement waits for velocity update
 
 This pattern lets you write programs without rigid ordering: a program can
@@ -1708,7 +1724,7 @@ questGraph =
 - Patch conflicts are resolved by list order; no merge policy beyond `Semigroup` order.
 - Event waits return matching event lists, not single-event consume semantics.
 - `await Update` is a seen-barrier, not a "everything fully finished" barrier.
-- `await <batch>` is only valid in `ProgramM`; using it in `EntityM` is a runtime error.
+- `await <batch>` is only valid in `ProgramM`; attempting it from `EntityM` is rejected by types.
 - `QueryableSum` skips signature pruning; sum queries scan all entities.
 - Dependent queries are possible (`Monad`/`Alternative`), but those compositions drop signature pruning and may force full scans.
 - No spatial index; collision queries are naive unless you build your own structure.

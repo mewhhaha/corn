@@ -53,6 +53,9 @@ module Engine.Data.Program
   , Await
   , Awaitable(..)
   , await
+  , Sticky
+  , sticky
+  , awaitSticky
   , emit
   , emitMany
   , Tick(..)
@@ -80,7 +83,7 @@ import Data.Kind (Type)
 import qualified Data.IntMap.Strict as IntMap
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid (Endo(..))
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
@@ -270,6 +273,21 @@ data Await c msg a where
   Update :: Await c msg ()
   BatchWait :: Batch c msg a -> Await c msg a
 
+data Sticky msg a where
+  StickyPure :: a -> Sticky msg a
+  StickyNeed :: (msg -> Maybe a) -> Sticky msg a
+  StickyAp :: Sticky msg (a -> b) -> Sticky msg a -> Sticky msg b
+
+instance Functor (Sticky msg) where
+  fmap f s = pure f <*> s
+
+instance Applicative (Sticky msg) where
+  pure = StickyPure
+  (<*>) = StickyAp
+
+sticky :: (msg -> Maybe a) -> Sticky msg a
+sticky = StickyNeed
+
 class Awaitable c msg a b | a -> b where
   toAwait :: a -> Await c msg b
 
@@ -279,14 +297,14 @@ instance Awaitable c msg (Await c msg a) a where
 instance Awaitable c msg (Handle a) a where
   toAwait = ProgramAwait
 
-instance Awaitable c msg (Batch c msg a) a where
-  toAwait = BatchWait
-
 instance Awaitable c msg (msg -> Bool) (Events msg) where
   toAwait = Event
 
 instance Awaitable c I.Input I.InputPred (Events I.Input) where
   toAwait (I.InputPred p) = Event p
+
+class AwaitableM (m :: Type -> Type) a b | m a -> b where
+  awaitA :: a -> m b
 
 awaitGate :: Await c msg a -> Inbox msg -> Maybe a
 awaitGate waitOn inbox =
@@ -765,8 +783,80 @@ class Monad m => MonadProgram c msg m | m -> c msg where
   awaitM :: Await c msg a -> m a
   stepM :: (HasCallStack, Typeable a, Typeable b) => F.Step a b -> a -> m b
 
-await :: (MonadProgram c msg m, Awaitable c msg a b) => a -> m b
-await = awaitM . toAwait
+instance MonadProgram c msg m => AwaitableM m (Await c msg a) a where
+  awaitA = awaitM
+
+instance MonadProgram c msg m => AwaitableM m (Handle a) a where
+  awaitA = awaitM . ProgramAwait
+
+instance MonadProgram c msg m => AwaitableM m (msg -> Bool) (Events msg) where
+  awaitA = awaitM . Event
+
+instance MonadProgram c I.Input m => AwaitableM m I.InputPred (Events I.Input) where
+  awaitA (I.InputPred p) = awaitM (Event p)
+
+instance AwaitableM (ProgramM c msg) (Batch c msg a) a where
+  awaitA b = awaitM (BatchWait b)
+
+instance MonadProgram c msg m => AwaitableM m (Sticky msg a) a where
+  awaitA = awaitSticky
+
+await :: forall m a b. AwaitableM m a b => a -> m b
+await = awaitA @m @a @b
+
+firstJust :: (a -> Maybe b) -> [a] -> Maybe b
+firstJust f = go
+  where
+    go [] = Nothing
+    go (x : xs) =
+      case f x of
+        Just y -> Just y
+        Nothing -> go xs
+
+stickyReady :: Sticky msg a -> Maybe a
+stickyReady s =
+  case s of
+    StickyPure a -> Just a
+    StickyNeed _ -> Nothing
+    StickyAp sf sa ->
+      case stickyReady sf of
+        Nothing -> Nothing
+        Just f ->
+          case stickyReady sa of
+            Nothing -> Nothing
+            Just a -> Just (f a)
+
+stickyMatch :: Sticky msg a -> msg -> Bool
+stickyMatch s msg =
+  case s of
+    StickyPure _ -> False
+    StickyNeed pick -> isJust (pick msg)
+    StickyAp sf sa -> stickyMatch sf msg || stickyMatch sa msg
+
+stickyFeed :: Events msg -> Sticky msg a -> Sticky msg a
+stickyFeed evs s =
+  case s of
+    StickyPure _ -> s
+    StickyNeed pick ->
+      case firstJust pick evs of
+        Just a -> StickyPure a
+        Nothing -> s
+    StickyAp sf sa ->
+      let sf' = stickyFeed evs sf
+          sa' = stickyFeed evs sa
+      in case (sf', sa') of
+          (StickyPure f, StickyPure a) -> StickyPure (f a)
+          _ -> StickyAp sf' sa'
+
+awaitSticky :: MonadProgram c msg m => Sticky msg a -> m a
+awaitSticky s0 = go s0
+  where
+    go s =
+      case stickyReady s of
+        Just a -> pure a
+        Nothing -> do
+          evs <- awaitM (Event (stickyMatch s))
+          go (stickyFeed evs s)
 
 instance MonadProgram c msg (ProgramM c msg) where
   send out = ProgramM $ \ctx ->
