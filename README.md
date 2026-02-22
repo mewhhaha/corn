@@ -1720,15 +1720,17 @@ questGraph =
 ## Pain points (current)
 
 - No built-in IO/async runtime: `Job`/`Events` are data only; you need an external executor.
-- Program graph shares an inbox snapshot per round, but world updates are applied in list order; ordering affects visibility and patch merge.
-- Patch conflicts are resolved by list order; no merge policy beyond `Semigroup` order.
-- Event waits return matching event lists, not single-event consume semantics.
+- Programs in a round share one inbox snapshot; world updates are applied in list order, so ordering affects visibility and patch merge.
+- Patch conflicts are resolved by list order; there is no merge policy beyond `Semigroup` order.
+- `await (msg -> Bool)` returns all matching events from the snapshot, not single-event consume semantics.
+- Sequential predicate waits do not remember prior-frame partial matches; use sticky applicative waits (`await ((,) <$> sticky a <*> sticky b)`) when you need accumulation across frames.
 - `await Update` is a seen-barrier, not a "everything fully finished" barrier.
 - `await <batch>` is only valid in `ProgramM`; attempting it from `EntityM` is rejected by types.
 - `QueryableSum` skips signature pruning; sum queries scan all entities.
 - Dependent queries are possible (`Monad`/`Alternative`), but those compositions drop signature pruning and may force full scans.
 - No spatial index; collision queries are naive unless you build your own structure.
 - `Events` are plain lists: order follows evaluation order, but there are no timestamps or priorities.
-- Long-running `Step` state lives in program/entity locals; lifecycle cleanup is mostly manual.
-- Coroutine programs aren’t serializable as data; mid-flight saves require input logging/replay.
+- `step` state is callsite-sensitive and long-running local state cleanup is mostly manual.
+- Continuation snapshots are not serializable as plain data; mid-flight restore is replay-based (persist world/graph seed plus input+`dt` log).
+- Self-satisfying send/await loops can fail to converge within a frame if a program keeps re-triggering its own wait.
 - `progress` clamps while `range`/`window` are nullable windows; mixing them can introduce subtle logic bugs.
