@@ -57,6 +57,7 @@ Expectation:
 
 Good:
 - Use `E.query @RecordType` or `E.comp <*> E.comp` for predictable signature-gated scans.
+- In hot loops, wrap queries with `E.requireQuerySigPruning "<label>"` to catch accidental non-pruned shapes.
 
 Bad:
 - Use nested `>>=` / `<|>` in hot loops and assume pruning is unchanged.
@@ -73,6 +74,7 @@ Expectation:
 
 Good:
 - Use `QueryableSum` where readability dominates and row count is small/moderate.
+- Use `E.queryHasSigPruning` to confirm whether a query shape will prune before using it in hot paths.
 
 Bad:
 - Rely on sum queries for high-cardinality hot paths while expecting product-query pruning performance.

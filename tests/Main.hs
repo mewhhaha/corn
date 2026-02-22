@@ -117,6 +117,11 @@ main = do
       , quickCheckResult prop_put_getr
       , quickCheckResult prop_query_app
       , quickCheckResult prop_query_alt
+      , quickCheckResult prop_query_pruning_applicative
+      , quickCheckResult prop_query_pruning_monad
+      , quickCheckResult prop_query_pruning_alternative
+      , quickCheckResult prop_query_pruning_sum
+      , quickCheckResult prop_require_query_pruning_passthrough
       , quickCheckResult prop_query_queryable
       , quickCheckResult prop_query_queryable_sum
       , quickCheckResult prop_bag_mask_value_coherence

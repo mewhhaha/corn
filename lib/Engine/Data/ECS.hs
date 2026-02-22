@@ -49,6 +49,8 @@ module Engine.Data.ECS
   , Query(..)
   , QueryInfo(..)
   , queryInfo
+  , queryHasSigPruning
+  , requireQuerySigPruning
   , sigFromBag
   , runQuerySig
   , keyOf
@@ -1005,6 +1007,22 @@ data Query c a = Query
 
 queryInfo :: Query c a -> QueryInfo
 queryInfo = queryInfoQ
+
+queryHasSigPruning :: Query c a -> Bool
+queryHasSigPruning q =
+  let QueryInfo req forbid = queryInfoQ q
+  in req /= 0 || forbid /= 0
+
+requireQuerySigPruning :: String -> Query c a -> Query c a
+requireQuerySigPruning label q =
+  if queryHasSigPruning q
+    then q
+    else
+      error
+        ( "requireQuerySigPruning("
+            <> label
+            <> "): query has no signature pruning; likely from QueryableSum/Monad/Alternative composition and may force a full scan"
+        )
 
 mapQuery :: (a -> b) -> Query c a -> Query c b
 {-# INLINE mapQuery #-}

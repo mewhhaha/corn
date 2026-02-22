@@ -1,0 +1,16 @@
+cabal-version:      3.14
+name:               corn-examples
+version:            0.1.0.0
+build-type:         Simple
+
+executable corn-examples
+    main-is:          Main.hs
+    hs-source-dirs:   app
+                      src
+    other-modules:    Examples.Platformer
+                      Examples.HordeSurvival
+                      Examples.BulletHell
+    ghc-options:      -Wall
+    build-depends:    base ^>=4.21.0.0
+                      , corn
+    default-language: GHC2024

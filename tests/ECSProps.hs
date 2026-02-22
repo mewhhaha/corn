@@ -9,6 +9,11 @@ module ECSProps
   , prop_put_getr
   , prop_query_app
   , prop_query_alt
+  , prop_query_pruning_applicative
+  , prop_query_pruning_monad
+  , prop_query_pruning_alternative
+  , prop_query_pruning_sum
+  , prop_require_query_pruning_passthrough
   , prop_query_queryable
   , prop_query_queryable_sum
   , prop_bag_mask_value_coherence
@@ -71,6 +76,39 @@ prop_query_alt x =
   let (e, w) = E.spawn x (E.emptyWorld :: World)
       q = (E.comp :: E.Query C Int) <|> fmap (const 0) (E.comp :: E.Query C Bool)
   in E.runq q w == [(e, x)]
+
+prop_query_pruning_applicative :: Int -> Bool
+prop_query_pruning_applicative x =
+  let (_, w) = E.spawn (x, True) (E.emptyWorld :: World)
+      q = (,) <$> (E.comp :: E.Query C Int) <*> (E.comp :: E.Query C Bool)
+  in E.queryHasSigPruning q && not (null (E.runq q w))
+
+prop_query_pruning_monad :: Int -> Bool
+prop_query_pruning_monad x =
+  let (_, w) = E.spawn (x, True) (E.emptyWorld :: World)
+      q = do
+        n <- (E.comp :: E.Query C Int)
+        b <- (E.comp :: E.Query C Bool)
+        pure (n, b)
+  in not (E.queryHasSigPruning q) && not (null (E.runq q w))
+
+prop_query_pruning_alternative :: Int -> Bool
+prop_query_pruning_alternative x =
+  let (_, w) = E.spawn x (E.emptyWorld :: World)
+      q = (E.comp :: E.Query C Int) <|> fmap (const 0) (E.comp :: E.Query C Bool)
+  in not (E.queryHasSigPruning q) && not (null (E.runq q w))
+
+prop_query_pruning_sum :: Int -> Bool
+prop_query_pruning_sum x =
+  let (_, w) = E.spawn x (E.emptyWorld :: World)
+      q = E.querySum @QSum
+  in not (E.queryHasSigPruning q) && not (null (E.runq q w))
+
+prop_require_query_pruning_passthrough :: Int -> Bool
+prop_require_query_pruning_passthrough x =
+  let (e, w) = E.spawn (x, True) (E.emptyWorld :: World)
+      q = (,) <$> (E.comp :: E.Query C Int) <*> (E.comp :: E.Query C Bool)
+  in E.runq (E.requireQuerySigPruning "ecsprops/applicative" q) w == [(e, (x, True))]
 
 data QB = QB
   { qbInt :: Int

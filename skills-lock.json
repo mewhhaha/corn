@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "good-haskell-code": {
+      "source": "/home/mewhhaha/src/haskell-skill",
+      "sourceType": "local",
+      "computedHash": "f28a7676754f1054e7e781b4681e8257c207ea4d9d059781ab241c342da69604"
+    }
+  }
+}

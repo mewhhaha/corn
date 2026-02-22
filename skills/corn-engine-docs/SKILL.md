@@ -8,10 +8,11 @@ description: Explain and apply Corn runtime semantics, invariants, benchmark exp
 ## Workflow
 
 1. Read `references/first-principles.md` for the engine model and non-goals.
-2. Read `references/invariants.md` for hard behavioral/performance contracts.
-3. Read `references/expectations-good-bad.md` when clarifying pain points or limits.
-4. Classify each claim as `invariant`, `expectation`, or `non-goal`.
-5. Anchor claims to concrete code paths before proposing changes.
+2. For game-logic timing questions, read `references/time-function-concepts.md`.
+3. Read `references/invariants.md` for hard behavioral/performance contracts.
+4. Read `references/expectations-good-bad.md` when clarifying pain points or limits.
+5. Classify each claim as `invariant`, `expectation`, or `non-goal`.
+6. Anchor claims to concrete code paths before proposing changes.
 
 ## Classification Rules
 
@@ -34,5 +35,6 @@ description: Explain and apply Corn runtime semantics, invariants, benchmark exp
 ## Reference Map
 
 - `references/first-principles.md`: model, runtime semantics, and non-goals.
+- `references/time-function-concepts.md`: mapping from FRP time primitives to common game concepts and pitfalls.
 - `references/invariants.md`: explicit runtime/ECS/benchmark invariants.
 - `references/expectations-good-bad.md`: expectation boundaries with good/bad examples.

@@ -21,6 +21,13 @@ Note: Some examples use `do` with Applicative only; enable `ApplicativeDo`.
 Many examples also use `deriving (Generic)` and type applications (`@`);
 enable `DeriveGeneric` and `TypeApplications` where needed.
 
+Runnable genre concepts live under `examples/`:
+
+```sh
+cd examples
+cabal run corn-examples -- all
+```
+
 ## Philosophy (the short version)
 
 - Continuous, async-first: programs are coroutines that run across frames; `await` is explicit and everything else stays pure.
@@ -576,6 +583,20 @@ whoQ = E.querySum @Who
 ```
 
 Sum queries use `<|>` and therefore skip signature pruning.
+
+For hot paths, guard query shape explicitly:
+
+```haskell
+{-# LANGUAGE TypeApplications #-}
+
+movementQ :: E.Query C (Position, Velocity)
+movementQ =
+  E.requireQuerySigPruning "movement/system"
+    ((,) <$> (E.comp @Position) <*> (E.comp @Velocity))
+
+-- Optional introspection:
+-- E.queryHasSigPruning movementQ == True
+```
 
 ### 6) Filter and map queries
 
@@ -1720,17 +1741,15 @@ questGraph =
 ## Pain points (current)
 
 - No built-in IO/async runtime: `Job`/`Events` are data only; you need an external executor.
-- Programs in a round share one inbox snapshot; world updates are applied in list order, so ordering affects visibility and patch merge.
-- Patch conflicts are resolved by list order; there is no merge policy beyond `Semigroup` order.
-- `await (msg -> Bool)` returns all matching events from the snapshot, not single-event consume semantics.
-- Sequential predicate waits do not remember prior-frame partial matches; use sticky applicative waits (`await ((,) <$> sticky a <*> sticky b)`) when you need accumulation across frames.
-- `await Update` is a seen-barrier, not a "everything fully finished" barrier.
-- `await <batch>` is only valid in `ProgramM`; attempting it from `EntityM` is rejected by types.
-- `QueryableSum` skips signature pruning; sum queries scan all entities.
-- Dependent queries are possible (`Monad`/`Alternative`), but those compositions drop signature pruning and may force full scans.
-- No spatial index; collision queries are naive unless you build your own structure.
-- `Events` are plain lists: order follows evaluation order, but there are no timestamps or priorities.
-- `step` state is callsite-sensitive and long-running local state cleanup is mostly manual.
-- Continuation snapshots are not serializable as plain data; mid-flight restore is replay-based (persist world/graph seed plus input+`dt` log).
-- Self-satisfying send/await loops can fail to converge within a frame if a program keeps re-triggering its own wait.
-- `progress` clamps while `range`/`window` are nullable windows; mixing them can introduce subtle logic bugs.
+- Round semantics are order-sensitive: programs read one inbox snapshot for the round, and world patch order affects visibility/override behavior.
+- Patch conflicts are resolved by composition order only; there is no conflict-resolution policy beyond `Semigroup` order.
+- Event waits are easy to misread: predicate waits return all matches (not queue-consume), and sequential waits do not accumulate prior-frame partials unless you use sticky applicative waits.
+- `await Update` is a seen-barrier, not a "global completion" barrier.
+- Batch waits are `ProgramM`-only; trying to structure the same pattern inside `EntityM` requires refactoring.
+- Query performance has cliffs: `QueryableSum`, `Monad`, and `Alternative` query composition can drop signature pruning and force wider scans.
+- There is no built-in spatial index, so collision/nearby queries are naive unless you provide your own structure.
+- Events carry no timestamp/priority metadata, so advanced ordering/fairness schemes are manual.
+- `step` state is callsite-sensitive and long-lived unless explicitly cleaned up, which can create subtle lifecycle bugs.
+- Mid-flight continuation state is not value-serializable; restore is replay-backed (seed + input/`dt` log).
+- Self-triggering send/await loops can fail to converge within a frame.
+- Time APIs have distinct inactive semantics (`progress` clamps, `range`/`window` are nullable), and mixing them can cause logic bugs.

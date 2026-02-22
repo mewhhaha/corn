@@ -300,10 +300,10 @@ instance Awaitable c msg (Handle a) a where
 instance Awaitable c msg (msg -> Bool) (Events msg) where
   toAwait = Event
 
-instance Awaitable c I.Input I.InputPred (Events I.Input) where
+instance (msg ~ I.Input) => Awaitable c msg I.InputPred (Events msg) where
   toAwait (I.InputPred p) = Event p
 
-class AwaitableM (m :: Type -> Type) a b | m a -> b where
+class (MonadProgram c msg m) => AwaitableM c msg (m :: Type -> Type) a b | m -> c msg, m a -> b where
   awaitA :: a -> m b
 
 awaitGate :: Await c msg a -> Inbox msg -> Maybe a
@@ -590,7 +590,7 @@ mergeEachAcc a b =
     }
 
 eachM :: forall a c msg.
-  (HasCallStack, Typeable a, Typeable msg, E.Queryable c a) =>
+  (HasCallStack, Typeable a, E.Queryable c a) =>
   (a -> EntityM c msg ()) ->
   Batch c msg ()
 {-# INLINE eachM #-}
@@ -604,7 +604,7 @@ eachM f =
   in eachMWith progKey req forb runMatch f
 
 eachMWith :: forall c msg a.
-  (Typeable a, Typeable msg) =>
+  Typeable a =>
   Int ->
   E.Sig ->
   E.Sig ->
@@ -783,26 +783,26 @@ class Monad m => MonadProgram c msg m | m -> c msg where
   awaitM :: Await c msg a -> m a
   stepM :: (HasCallStack, Typeable a, Typeable b) => F.Step a b -> a -> m b
 
-instance MonadProgram c msg m => AwaitableM m (Await c msg a) a where
+instance MonadProgram c msg m => AwaitableM c msg m (Await c msg a) a where
   awaitA = awaitM
 
-instance MonadProgram c msg m => AwaitableM m (Handle a) a where
+instance MonadProgram c msg m => AwaitableM c msg m (Handle a) a where
   awaitA = awaitM . ProgramAwait
 
-instance MonadProgram c msg m => AwaitableM m (msg -> Bool) (Events msg) where
+instance MonadProgram c msg m => AwaitableM c msg m (msg -> Bool) (Events msg) where
   awaitA = awaitM . Event
 
-instance MonadProgram c I.Input m => AwaitableM m I.InputPred (Events I.Input) where
+instance (msg ~ I.Input, MonadProgram c msg m) => AwaitableM c msg m I.InputPred (Events msg) where
   awaitA (I.InputPred p) = awaitM (Event p)
 
-instance AwaitableM (ProgramM c msg) (Batch c msg a) a where
+instance (c' ~ c, msg' ~ msg) => AwaitableM c msg (ProgramM c msg) (Batch c' msg' a) a where
   awaitA b = awaitM (BatchWait b)
 
-instance MonadProgram c msg m => AwaitableM m (Sticky msg a) a where
+instance MonadProgram c msg m => AwaitableM c msg m (Sticky msg a) a where
   awaitA = awaitSticky
 
-await :: forall m a b. AwaitableM m a b => a -> m b
-await = awaitA @m @a @b
+await :: forall c msg m a b. (MonadProgram c msg m, AwaitableM c msg m a b) => a -> m b
+await = awaitA @c @msg @m @a @b
 
 firstJust :: (a -> Maybe b) -> [a] -> Maybe b
 firstJust f = go
