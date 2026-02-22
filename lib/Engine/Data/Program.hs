@@ -178,37 +178,6 @@ newtype Handle (a :: Type) = Handle
   { handleId :: ProgramId
   } deriving (Eq, Ord, Show)
 
-type ProgSet = IntSet
-
-type Done = ProgSet
-type Seen = ProgSet
-
-progSetEmpty :: IntSet -> ProgSet
-progSetEmpty _ = IntSet.empty
-
-progSetMember :: Int -> ProgSet -> Bool
-progSetMember = IntSet.member
-
-progSetInsert :: Int -> ProgSet -> ProgSet
-progSetInsert = IntSet.insert
-
-progSetToIntSet :: ProgSet -> IntSet
-progSetToIntSet = id
-
-intSetSubsetOfProgSet :: IntSet -> ProgSet -> Bool
-intSetSubsetOfProgSet = IntSet.isSubsetOf
-
-newtype Values = Values (IntMap.IntMap Any)
-
-valuesEmpty :: IntSet -> Values
-valuesEmpty _ = Values IntMap.empty
-
-valuesLookup :: ProgramId -> Values -> Maybe Any
-valuesLookup sid (Values m) = IntMap.lookup sid m
-
-valuesInsert :: ProgramId -> Any -> Values -> Values
-valuesInsert sid v (Values m) = Values (IntMap.insert sid v m)
-
 mixKey :: Int -> Int -> Int
 {-# INLINE mixKey #-}
 mixKey a b = (a * 16777619) `xor` b
@@ -273,10 +242,10 @@ handleOf = programHandle
 
 data Inbox a = Inbox
   { eventsI :: Events a
-  , doneI :: Done
-  , seenI :: Seen
+  , doneI :: IntSet
+  , seenI :: IntSet
   , allI :: IntSet
-  , valuesI :: Values
+  , valuesI :: IntMap.IntMap Any
   , selfI :: ProgramId
   }
 
@@ -284,10 +253,10 @@ events :: Inbox a -> Events a
 events = eventsI
 
 done :: Inbox a -> IntSet
-done = progSetToIntSet . doneI
+done = doneI
 
 seen :: Inbox a -> IntSet
-seen = progSetToIntSet . seenI
+seen = seenI
 
 allIds :: Inbox a -> IntSet
 allIds = allI
@@ -327,8 +296,8 @@ awaitGate waitOn inbox =
       in if null hits then Nothing else Just hits
     ProgramAwait h ->
       let sid = handleId h
-          ready = progSetMember sid (doneI inbox)
-          value = valuesLookup sid (valuesI inbox)
+          ready = IntSet.member sid (doneI inbox)
+          value = IntMap.lookup sid (valuesI inbox)
       in if not ready
             then Nothing
             else case value of
@@ -336,7 +305,7 @@ awaitGate waitOn inbox =
               Nothing -> error "await: value missing for program handle (type mismatch?)"
     Update ->
       let others = IntSet.delete (selfI inbox) (allI inbox)
-          synced = intSetSubsetOfProgSet others (seenI inbox)
+          synced = IntSet.isSubsetOf others (seenI inbox)
       in if synced then Just () else Nothing
     BatchWait _ -> Nothing
 
@@ -547,10 +516,13 @@ batchRun1 ::
   BatchRun c msg a
 batchRun1 req forb g =
   let g' = fmap (first unsafeCoerce) g
-      k xs i =
-        if i < V.length xs
-          then (unsafeCoerce (V.unsafeIndex xs i), i + 1)
-          else error "batch: missing result"
+      k xs =
+        let len = V.length xs
+        in
+          \i ->
+            if i < len
+              then (unsafeCoerce (V.unsafeIndex xs i), i + 1)
+              else error "batch: missing result"
   in BatchRun (V.singleton (BatchOp req forb g')) 1 k
 
 each :: forall a c msg. E.Queryable c a => (a -> EntityPatch c) -> Batch c msg ()
@@ -571,20 +543,29 @@ each f =
 
 data EachAcc c msg = EachAcc
   { eaOut :: !(Out msg)
-  , eaOld :: !(IntMap.IntMap (ProgState c msg))
+  , eaOld :: !(OldProgStates c msg)
   , eaNew :: !(IntMap.IntMap (ProgState c msg))
   , eaDt :: !DTime
   , eaInbox :: !(Inbox msg)
   }
 
-emptyEachAcc :: DTime -> Inbox msg -> IntMap.IntMap (ProgState c msg) -> EachAcc c msg
+data OldProgStates c msg
+  = OldProgStatesNone
+  | OldProgStatesMap !(IntMap.IntMap (ProgState c msg))
+
+lookupOldProgState :: Int -> OldProgStates c msg -> Maybe (ProgState c msg)
+{-# INLINE lookupOldProgState #-}
+lookupOldProgState _ OldProgStatesNone = Nothing
+lookupOldProgState eid' (OldProgStatesMap m) = IntMap.lookup eid' m
+
+emptyEachAcc :: DTime -> Inbox msg -> OldProgStates c msg -> EachAcc c msg
 emptyEachAcc d inbox prog = EachAcc mempty prog IntMap.empty d inbox
 
 mergeEachAcc :: EachAcc c msg -> EachAcc c msg -> EachAcc c msg
 mergeEachAcc a b =
   EachAcc
     { eaOut = eaOut a <> eaOut b
-    , eaOld = IntMap.empty
+    , eaOld = OldProgStatesNone
     , eaNew = IntMap.union (eaNew b) (eaNew a)
     , eaDt = eaDt a
     , eaInbox = eaInbox a
@@ -616,10 +597,14 @@ eachMWith :: forall c msg a.
 eachMWith progKey req forb runMatch f =
   Batch (\d inbox locals ->
     let
-      progMap0 :: IntMap.IntMap (ProgState c msg)
-      progMap0 =
-        maybe IntMap.empty unsafeCoerce (IntMap.lookup progKey (localsGlobal locals))
-      acc0 = emptyEachAcc d inbox progMap0
+      oldStates0 =
+        case IntMap.lookup progKey (localsGlobal locals) of
+          Nothing -> OldProgStatesNone
+          Just v ->
+            let m :: IntMap.IntMap (ProgState c msg)
+                m = unsafeCoerce v
+            in if IntMap.null m then OldProgStatesNone else OldProgStatesMap m
+      acc0 = emptyEachAcc d inbox oldStates0
     in batchRun1 req forb (Gather acc0 stepEntity doneEntity mergeEntity splitEntity))
   where
     stepEntity e sig bag acc =
@@ -627,27 +612,29 @@ eachMWith progKey req forb runMatch f =
         Nothing ->
           (sig, bag, acc)
         Just a ->
-          let d = eaDt acc
-              inbox = eaInbox acc
-              eid' = E.eid e
-              mState = IntMap.lookup eid' (eaOld acc)
-              (prog0, machines0) =
-                case mState of
-                  Just (ProgState mProg machinesStored) ->
-                    let prog0' = fromMaybe (f a) mProg
-                    in (prog0', machinesStored)
-                  Nothing -> (f a, IntMap.empty)
-              (bag', sig', machines', out', waitE, prog', _) =
-                runEntityM d inbox sig bag machines0 prog0
-              progKeep = waitE || not (IntMap.null machines')
-              progState = ProgState (if waitE then Just prog' else Nothing) machines'
-              !newMap' =
-                if progKeep
-                  then IntMap.insert eid' progState (eaNew acc)
-                  else eaNew acc
-              !outAcc' = eaOut acc <> out'
-              acc' = acc { eaOut = outAcc', eaNew = newMap' }
-          in (sig', bag', acc')
+          let eid' = E.eid e
+              mState = lookupOldProgState eid' (eaOld acc)
+          in stepEntityMatched eid' sig bag acc a mState
+    stepEntityMatched eid' sig bag acc a mState =
+      let d = eaDt acc
+          inbox = eaInbox acc
+          (prog0, machines0) =
+            case mState of
+              Just (ProgState mProg machinesStored) ->
+                let prog0' = fromMaybe (f a) mProg
+                in (prog0', machinesStored)
+              Nothing -> (f a, IntMap.empty)
+          (bag', sig', machines', out', waitE, prog', _) =
+            runEntityM d inbox sig bag machines0 prog0
+          progKeep = waitE || not (IntMap.null machines')
+          progState = ProgState (if waitE then Just prog' else Nothing) machines'
+          !newMap' =
+            if progKeep
+              then IntMap.insert eid' progState (eaNew acc)
+              else eaNew acc
+          !outAcc' = eaOut acc <> out'
+          acc' = acc { eaOut = outAcc', eaNew = newMap' }
+      in (sig', bag', acc')
     doneEntity acc =
       let updateLocals locals0 =
               let globals0 = localsGlobal locals0
@@ -897,8 +884,8 @@ runProgramM d w0 inbox locals0 prog0 =
 
 run :: DTime -> World c -> Events a -> Graph c a -> (World c, Events a, Graph c a)
 run d w0 inbox g0 =
-  let emptySet = progSetEmpty allSet
-  in go w0 programs0 (repeat True) emptySet emptySet (valuesEmpty allSet) mempty False
+  let emptySet = IntSet.empty
+  in go w0 programs0 (repeat True) emptySet emptySet IntMap.empty mempty False
   where
     Graph programs0 = g0
     allSet = foldl' (\acc p -> IntSet.insert (programId p) acc) IntSet.empty programs0
@@ -909,7 +896,7 @@ run d w0 inbox g0 =
           (w', roundOut, programs', nextRun, done1, seen1, values1, progressed, stepped') =
             stepRound d w available programs toRun doneSet seenSet values allSet stepped
           !accOut' = accOut <> roundOut
-      in if not (or nextRun) || not progressed
+      in if not progressed || not (or nextRun)
           then (w', outToList accOut', Graph programs')
           else go w' programs' nextRun done1 seen1 values1 accOut' stepped'
 
@@ -918,15 +905,16 @@ stepRound :: DTime
           -> Events a
           -> [ProgramSlot c a]
           -> [Bool]
-          -> Done
-          -> Seen
-          -> Values
+          -> IntSet
+          -> IntSet
+          -> IntMap.IntMap Any
           -> IntSet
           -> Bool
-          -> (World c, Out a, [ProgramSlot c a], [Bool], Done, Seen, Values, Bool, Bool)
+          -> (World c, Out a, [ProgramSlot c a], [Bool], IntSet, IntSet, IntMap.IntMap Any, Bool, Bool)
 stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
-  let (w1, out1, programs1, run1, done1, seen1, values1, progressed1, pending) =
-        runProgramsPhase events0 done0 seen0 values0 w0 (zip programs toRun)
+  let paired = zipProgramRuns programs toRun
+      (w1, out1, programs1, run1, done1, seen1, values1, progressed1, pending) =
+        runProgramsPhase events0 done0 seen0 values0 w0 paired
   in case pending of
       [] -> (w1, out1, programs1, run1, done1, seen1, values1, progressed1, stepped0)
       _ ->
@@ -934,6 +922,12 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
               runBatchesPhase d w1 pending programs1 run1 stepped0
         in (w2, out1 <> out2, programs2, run2, done1, seen1, values1, progressed1 || progressed2, stepped1)
   where
+    zipProgramRuns ps fs =
+      case (ps, fs) of
+        ([], _) -> []
+        (_, []) -> error "stepRound: unreachable missing run flags"
+        (p : ps', f : fs') -> (p, f) : zipProgramRuns ps' fs'
+
     runProgramsPhase inb doneSet seenSet valuesSet w pairs =
       go w mempty doneSet seenSet valuesSet False pairs
       where
@@ -951,22 +945,22 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
                   let sid = handleId h
                       -- Program awaits resolve against the round snapshot.
                       inbox1 = Inbox inb doneSet seenSet allSet valuesSet sid
-                      sSet1 = progSetInsert sid sSet
-                      progressedSeen = not (progSetMember sid sSet)
+                      sSet1 = IntSet.insert sid sSet
+                      progressedSeen = not (IntSet.member sid sSet)
                       runProgram prog0 =
                         let (t, locals', resStep) = runProgramM d wAcc inbox1 locals0 prog0
                             out = outT t
                             !accOut' = accOut <> outFrom out
                             w1 = apply (patchT t) wAcc
-                        in case resStep of
+                            in case resStep of
                             ProgDone _ ->
                               let slot1 = ProgramSlot h locals' (ProgramRun base0) base0
-                                  dSet1 = progSetInsert sid dSet
-                                  progressedDone = not (progSetMember sid dSet)
+                                  dSet1 = IntSet.insert sid dSet
+                                  progressedDone = not (IntSet.member sid dSet)
                                   vSet1 =
                                     case valueT t of
                                       Nothing -> vSet
-                                      Just v -> valuesInsert sid v vSet
+                                      Just v -> IntMap.insert sid v vSet
                                   progressed1 = progressed || progressedSeen || progressedDone || not (null out)
                                   (w2, out2, progs2, runs2, dSet2, sSet2, vSet2, progressed2, pending2) =
                                     go w1 accOut' dSet1 sSet1 vSet1 progressed1 rest
@@ -1029,20 +1023,17 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
     compilePending dTime (PendingBatch pid locals inbox b cont) =
       let Batch runBatch = b
           BatchRun ops n k = runBatch dTime inbox locals
-          kAny xs = unsafeCoerce (fst (k xs 0))
-          contAny v = unsafeCoerce (cont (unsafeCoerce v))
-          stepsList =
-            V.foldr
-              (\op acc -> opToStep pid op : acc)
-              []
-              ops
-          steps = V.fromListN n stepsList
+          opsLen = V.length ops
+          steps =
+            if n /= opsLen
+              then error "compilePending: batch op count mismatch"
+              else V.map (opToStep pid) ops
           group =
             BatchGroup
               { bgPid = pid
               , bgLocals = locals
-              , bgK = kAny
-              , bgCont = contAny
+              , bgK = \xs -> unsafeCoerce (fst (k xs 0))
+              , bgCont = \v -> unsafeCoerce (cont (unsafeCoerce v))
               }
       in CompiledBatch steps group
 
@@ -1258,35 +1249,38 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
                   then runPendingSteps state0 wStep
                   else
                     let rowChunks = splitRowChunks statefulChunkCount rows0
-                    in
-                      if length rowChunks <= 1
-                        then runPendingSteps state0 wStep
+                        rowChunkCount = length rowChunks
+                        stepChunks =
+                          if hasStateful
+                            then splitStepsForChunks steps0 rowChunks
+                            else replicate rowChunkCount steps0
+                        stepChunkCount = length stepChunks
+                    in if rowChunkCount == 0
+                        then error "runPendingStepsPar: unreachable empty row chunks"
                         else
-                          let stepChunks =
-                                if hasStateful
-                                  then splitStepsForChunks steps0 rowChunks
-                                  else replicate (length rowChunks) steps0
-                              (headRows, tailRows) =
-                                case rowChunks of
-                                  r : rs -> (r, rs)
-                                  [] -> error "runPendingStepsPar: empty row chunks"
-                              (headSteps, tailSteps) =
-                                case stepChunks of
-                                  s : ss -> (s, ss)
-                                  [] -> error "runPendingStepsPar: empty step chunks"
-                              -- Keep one chunk on the current capability and spark the rest.
-                              headResult = runChunk headSteps headRows
+                          if stepChunkCount /= rowChunkCount
+                            then error "runPendingStepsPar: unreachable chunk shape mismatch"
+                            else
+                              let chunkTasks = zip stepChunks rowChunks
+                              in case chunkTasks of
+                        (headTask : tailTasks) ->
+                          let -- Keep one chunk on the current capability and spark the rest.
+                              headResult = uncurry runChunk headTask
                               tailResults =
                                 withStrategy (parList rseq) $
-                                  zipWith runChunk tailSteps tailRows
+                                  map (uncurry runChunk) tailTasks
                               chunkResults = headResult : tailResults
                               rows' = V.concat (map fst chunkResults)
                               steps' =
                                 if hasStateful
                                   then mergeChunkSteps (map snd chunkResults)
                                   else steps0
-                              w' = E.setEntityRowsVSameShapeUnsafe rows' wStep
+                              w' =
+                                if V.length rows' /= rowCount
+                                  then error "runPendingStepsPar: unreachable row count changed"
+                                  else E.setEntityRowsVSameShapeUnsafe rows' wStep
                           in (w', PendingState steps' hasStateful)
+                        [] -> error "runPendingStepsPar: unreachable empty chunk tasks"
 
     finalizePendingState (PendingState steps0 _) compiled =
       let len = V.length steps0
@@ -1353,11 +1347,7 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
           in slot' : go rest
 
     updateRunFlags progs flags resumed =
-      let progsLen = length progs
-          flagsLen = length flags
-      in if progsLen /= flagsLen
-          then error "updateRunFlags: program and run-flag lengths differ"
-          else go progs flags
+      go progs flags
       where
         go [] [] = []
         go [] _ = error "updateRunFlags: unreachable extra run flags"

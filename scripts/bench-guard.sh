@@ -11,9 +11,7 @@ fi
 
 targets=(
   "program/10k/eachm"
-  "program/10k/eachm-aztecs"
   "program/10k+1/eachm"
-  "program/10k+1/eachm-aztecs"
 )
 
 run_target() {
@@ -23,7 +21,7 @@ run_target() {
   # In some sandboxed environments Cabal returns non-zero after a successful
   # benchmark run because ~/.cabal/logs is read-only. Keep running so the
   # benchmark output remains usable.
-  cabal bench pidgine-bench \
+  cabal bench corn-bench \
     --ghc-options=-O2 \
     --benchmark-options="-m glob ${name} --iters ${ITERS} +RTS -N -s -RTS" || true
 }

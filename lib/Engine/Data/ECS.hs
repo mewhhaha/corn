@@ -687,11 +687,13 @@ sigFromBag :: Bag c -> Sig
 sigFromBag = bagMask
 
 matchSig :: QueryInfo -> Sig -> Bool
+{-# INLINE matchSig #-}
 matchSig info sig =
   (sig .&. requireQ info) == requireQ info
     && (sig .&. forbidQ info) == 0
 
 runQuerySig :: Query c a -> Sig -> Entity -> Bag c -> Maybe a
+{-# INLINE runQuerySig #-}
 runQuerySig q sig e bag =
   if matchSig (queryInfoQ q) sig
     then runQuery q e bag
@@ -1077,8 +1079,9 @@ notQ =
 {-# INLINE notQ #-}
 
 runq :: Query c a -> World c -> [(Entity, a)]
+{-# INLINE runq #-}
 runq q w =
-  Foldable.foldr
+  V.foldr
     (\row acc ->
       case queryMatchRow q row of
         Nothing -> acc
@@ -1088,8 +1091,9 @@ runq q w =
     (rowsW w)
 
 foldq :: Query c a -> (Entity -> a -> s -> s) -> s -> World c -> s
+{-# INLINE foldq #-}
 foldq q step s0 w =
-  Foldable.foldl'
+  V.foldl'
     (\acc row ->
       case queryMatchRow q row of
         Nothing -> acc

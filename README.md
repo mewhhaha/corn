@@ -1,9 +1,10 @@
-# Pidgine
+# Corn
 
 Small, pure data layer for game engines with a minimal FRP core and a tiny ECS.
 Pattern name: **ECP** (Entity‑Component‑Program). The API is intentionally simple and favors short, single‑word names.
 
 See `docs/first-principles.md` for the core model and runtime semantics.
+See `docs/invariants.md` for runtime/domain invariants and performance guardrails.
 
 Suggested imports (to avoid name clashes with Prelude):
 
@@ -38,20 +39,18 @@ Benchmarks focus on quick, game‑like scenarios so iteration stays fast.
 - `game/rooftop-duel`: 1 bird + 2 perches (collaboration steering + collisions).
 - `game/flock-10k`: 1 lead pigeon + 10k flock birds (simple chase + damage).
 - `program/10k/eachm`: same workload as `game/flock-10k` with primary engine target name.
-- `program/10k/eachm-aztecs`: alias to `program/10k/eachm` for parity with roadmap docs.
 - `program/10k+1/eachm`: same as `program/10k/eachm` but with 10k+1 entities.
-- `program/10k+1/eachm-aztecs`: informational variant of `program/10k+1/eachm`.
 
 Run:
 
 ```sh
-cabal bench pidgine-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> +RTS -N -s -RTS'
+cabal bench corn-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> +RTS -N -s -RTS'
 ```
 
 Run allocation comparisons with fixed iterations:
 
 ```sh
-cabal bench pidgine-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> --iters 1000 +RTS -N -s -RTS'
+cabal bench corn-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> --iters 1000 +RTS -N -s -RTS'
 ```
 
 Run the full target set with optional allocation budgets:

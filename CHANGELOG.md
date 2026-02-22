@@ -1,4 +1,4 @@
-# Revision history for Pidgine
+# Revision history for Corn
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

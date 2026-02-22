@@ -11,14 +11,18 @@ module ECSProps
   , prop_query_alt
   , prop_query_queryable
   , prop_query_queryable_sum
+  , prop_bag_mask_value_coherence
   , prop_bag_apply_edit_packed_non_structural
   , prop_bag_apply_edit_packed_structural
+  , prop_run_query_sig_gate
   , prop_relations
   , prop_parent_child
   , prop_transform_inverse
   ) where
 
 import Control.Applicative ((<|>))
+import Data.Bits (bit, complement, (.&.))
+import Data.Maybe (isJust)
 import qualified Engine.Data.ECS as E
 import GHC.Generics (Generic)
 import qualified Engine.Data.Transform as T
@@ -88,6 +92,43 @@ prop_query_queryable_sum x =
   let (e, w) = E.spawn x (E.emptyWorld :: World)
   in E.runq (E.querySum @QSum) w == [(e, QInt x)]
 
+prop_bag_mask_value_coherence :: Int -> Bool -> Int -> Bool -> Bool -> Bool
+prop_bag_mask_value_coherence x b dx setLocal delBool =
+  let (_, w0) = E.spawn (x, b) (E.emptyWorld :: World)
+      bag0 =
+        case E.entityRows w0 of
+          E.EntityRow _ _ bag : _ -> bag
+          [] -> error "expected spawned entity"
+      local = T.Local (T.translate (fromIntegral x, fromIntegral dx, 0))
+      edit0 = E.bagEditUpdate @C @Int (+ dx)
+      edit1 =
+        if delBool
+          then edit0 <> E.bagEditDel @C @Bool
+          else edit0 <> E.bagEditSet @C @Bool (not b)
+      edit2 =
+        if setLocal
+          then edit1 <> E.bagEditSet @C @T.Local local
+          else edit1
+      bag1 = E.bagApplyEditPacked edit2 bag0
+      sig1 = E.sigFromBag bag1
+      coherentInt =
+        let hasBit = (sig1 .&. bit (E.componentBitOf @C @Int)) /= 0
+            hasVal = isJust (E.bagGet @C @Int bag1)
+        in hasBit == hasVal
+      coherentBool =
+        let hasBit = (sig1 .&. bit (E.componentBitOf @C @Bool)) /= 0
+            hasVal = isJust (E.bagGet @C @Bool bag1)
+        in hasBit == hasVal
+      coherentLocal =
+        let hasBit = (sig1 .&. bit (E.componentBitOf @C @T.Local)) /= 0
+            hasVal = isJust (E.bagGet @C @T.Local bag1)
+        in hasBit == hasVal
+      coherentGlobal =
+        let hasBit = (sig1 .&. bit (E.componentBitOf @C @T.Global)) /= 0
+            hasVal = isJust (E.bagGet @C @T.Global bag1)
+        in hasBit == hasVal
+  in coherentInt && coherentBool && coherentLocal && coherentGlobal
+
 prop_bag_apply_edit_packed_non_structural :: Int -> Bool -> Int -> Int -> Bool
 prop_bag_apply_edit_packed_non_structural x b dx dy =
   let (_, w0) = E.spawn (x, b) (E.emptyWorld :: World)
@@ -133,6 +174,22 @@ prop_bag_apply_edit_packed_structural x b dx dy =
             && E.bagGet @C @T.Local bagA == E.bagGet @C @T.Local bagB
             && E.bagGet @C @T.Global bagA == E.bagGet @C @T.Global bagB
   in sameResult editSetMissing && sameResult editDelPresent && sameResult editMixed
+
+prop_run_query_sig_gate :: Int -> Bool -> Bool
+prop_run_query_sig_gate x b =
+  let (_, w0) = E.spawn (x, b) (E.emptyWorld :: World)
+      qInt = E.comp :: E.Query C Int
+      qPair = (,) <$> (E.comp :: E.Query C Int) <*> (E.comp :: E.Query C Bool)
+  in case E.entityRows w0 of
+      E.EntityRow eid' sig bag : _ ->
+        let e = E.Entity eid'
+            sigNoInt = sig .&. complement (bit (E.componentBitOf @C @Int))
+            sigNoBool = sig .&. complement (bit (E.componentBitOf @C @Bool))
+        in E.runQuerySig qInt sig e bag == Just x
+            && E.runQuerySig qInt sigNoInt e bag == Nothing
+            && E.runQuerySig qPair sig e bag == Just (x, b)
+            && E.runQuerySig qPair sigNoBool e bag == Nothing
+      [] -> False
 
 data Owns
 

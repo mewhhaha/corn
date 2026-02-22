@@ -3,22 +3,20 @@
 Current performance target set:
 
 - `program/10k/eachm`
-- `program/10k/eachm-aztecs`
 - `program/10k+1/eachm` (informational only)
-- `program/10k+1/eachm-aztecs` (informational only)
 
 Use `cabal bench` directly (no `CABAL_DIR` override).
 
 Time runs:
 
 ```sh
-cabal bench pidgine-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> +RTS -N -s -RTS'
+cabal bench corn-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> +RTS -N -s -RTS'
 ```
 
 Allocation comparisons:
 
 ```sh
-cabal bench pidgine-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> --iters 1000 +RTS -N -s -RTS'
+cabal bench corn-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> --iters 1000 +RTS -N -s -RTS'
 ```
 
 Notes:

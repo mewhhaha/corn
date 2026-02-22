@@ -1,5 +1,5 @@
 cabal-version:      3.14
-name:               pidgine
+name:               corn
 version:            0.1.0.0
 -- synopsis:
 -- description:
@@ -35,7 +35,7 @@ library
     hs-source-dirs:   lib
     default-language: GHC2024
 
-test-suite pidgine-tests
+test-suite corn-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   tests
     main-is:          Main.hs
@@ -50,10 +50,10 @@ test-suite pidgine-tests
                       , vector ^>=0.13
                       , rrb-vector
                       , QuickCheck
-                      , pidgine
+                      , corn
     default-language: GHC2024
 
-benchmark pidgine-bench
+benchmark corn-bench
     type:             exitcode-stdio-1.0
     hs-source-dirs:   bench
     main-is:          Bench.hs
@@ -65,5 +65,5 @@ benchmark pidgine-bench
                       , vector ^>=0.13
                       , rrb-vector
                       , criterion
-                      , pidgine
+                      , corn
     default-language: GHC2024

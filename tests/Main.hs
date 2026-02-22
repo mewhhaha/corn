@@ -113,8 +113,10 @@ main = do
       , quickCheckResult prop_query_alt
       , quickCheckResult prop_query_queryable
       , quickCheckResult prop_query_queryable_sum
+      , quickCheckResult prop_bag_mask_value_coherence
       , quickCheckResult prop_bag_apply_edit_packed_non_structural
       , quickCheckResult prop_bag_apply_edit_packed_structural
+      , quickCheckResult prop_run_query_sig_gate
       , quickCheckResult prop_relations
       , quickCheckResult prop_parent_child
       , quickCheckResult prop_transform_inverse
