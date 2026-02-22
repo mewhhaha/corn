@@ -207,14 +207,12 @@ delay b0 = Step $ \_ b -> (b0, delay b)
 
 hold :: a -> Step (Events a) a
 hold a0 = Step $ \_ as ->
-  let a1 = case reverse as of
-        [] -> a0
-        (x : _) -> x
+  let a1 = foldl' (\_ x -> x) a0 as
   in (a1, hold a1)
 
 acc :: s -> Step (Events (s -> s)) s
 acc s0 = Step $ \_ fs ->
-  let s1 = foldl (\s f -> f s) s0 fs
+  let s1 = foldl' (\s f -> f s) s0 fs
   in (s1, acc s1)
 
 
@@ -303,7 +301,7 @@ instance Monoid b => Monoid (Step a b) where
   mempty = pure mempty
 
 lastEvent :: Events a -> Maybe a
-lastEvent = foldl (\_ x -> Just x) Nothing
+lastEvent = foldl' (\_ x -> Just x) Nothing
 
 delayOnce :: Step a (b, Events (Step a b)) -> Step a b -> Step a b
 delayOnce sOld sNext = Step $ \d a ->

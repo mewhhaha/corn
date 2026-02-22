@@ -9,6 +9,7 @@ import Data.List (foldl')
 import qualified Data.Foldable as Foldable
 import GHC.Generics (Generic)
 import qualified Engine.Data.ECS as E
+import qualified Engine.Data.FRP as F
 import qualified Engine.Data.Program as S
 
 data Pos = Pos {-# UNPACK #-} !Double {-# UNPACK #-} !Double
@@ -342,6 +343,37 @@ runStickyInline w0 =
       Just (Hp n) -> n
       Nothing -> 0
 
+frpBurstSize :: Int
+frpBurstSize = 4096
+
+mkAccBurstFns :: Int -> [Int -> Int]
+mkAccBurstFns n = replicate n (+1)
+
+mkHoldBurstEvents :: Int -> [Int]
+mkHoldBurstEvents n = [1 .. n]
+
+mkSwitchBurstEvents :: Int -> F.Events (F.Step () Int)
+mkSwitchBurstEvents n = map pure [1 .. n]
+
+runAccBurst :: Int -> Int
+runAccBurst n =
+  let fs = mkAccBurstFns n
+      (out, _) = F.stepS (F.acc (0 :: Int)) 0.016 fs
+  in out
+
+runHoldBurst :: Int -> Int
+runHoldBurst n =
+  let evs = mkHoldBurstEvents n
+      (out, _) = F.stepS (F.hold (0 :: Int)) 0.016 evs
+  in out
+
+runSwitchBurst :: Int -> Int
+runSwitchBurst n =
+  let evs = mkSwitchBurstEvents n
+      source = pure (0, evs)
+      (out, _) = F.stepS (F.switch source) 0.016 ()
+  in out
+
 main :: IO ()
 main = defaultMain
   [ bgroup "game"
@@ -373,5 +405,13 @@ main = defaultMain
   , bgroup "program/sticky"
       [ let w = E.emptyWorld
         in bench "inline-await" $ nf runStickyInline w
+      ]
+  , bgroup "frp/burst"
+      [ env (pure frpBurstSize) $ \n ->
+          bench "acc" $ nf runAccBurst n
+      , env (pure frpBurstSize) $ \n ->
+          bench "hold" $ nf runHoldBurst n
+      , env (pure frpBurstSize) $ \n ->
+          bench "switch" $ nf runSwitchBurst n
       ]
   ]
