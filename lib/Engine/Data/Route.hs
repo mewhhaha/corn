@@ -10,6 +10,7 @@
 module Engine.Data.Route
   ( SearchParams
   , UrlParams
+  , Meta(..)
   , Route(..)
   , Router(RNil, (:>))
   , emptyRouter
@@ -39,7 +40,7 @@ import Data.Proxy (Proxy(..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Engine.Data.Scene as Scene
-import GHC.Generics
+import GHC.Generics hiding (Meta)
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import Text.Read (readMaybe)
 
@@ -47,7 +48,7 @@ type SearchParams = Scene.SearchParams
 
 type UrlParams = Scene.UrlParams
 
-data Route sid search url = Route
+data Meta sid search url = Meta
   { routePattern :: String
   , routeSegments :: [sid]
   , routeLeafSegment :: Maybe sid
@@ -55,13 +56,18 @@ data Route sid search url = Route
   , routeSearchParamKeys :: [String]
   } deriving (Eq, Show)
 
+data Route c msg sid search url = Route
+  { meta :: Meta sid search url
+  , enter :: search -> url -> Scene.SceneRuntime c msg
+  }
+
 data Router sid routes where
   RNil :: Router sid '[]
   (:>) ::
     (SearchCodec search, UrlCodec url) =>
-    Route sid search url ->
+    Meta sid search url ->
     Router sid routes ->
-    Router sid (Route sid search url ': routes)
+    Router sid (Meta sid search url ': routes)
 infixr 5 :>
 
 emptyRouter :: Router sid '[]
@@ -69,9 +75,9 @@ emptyRouter = RNil
 
 addRoute ::
   (SearchCodec search, UrlCodec url) =>
-  Route sid search url ->
+  Meta sid search url ->
   Router sid routes ->
-  Router sid (Route sid search url ': routes)
+  Router sid (Meta sid search url ': routes)
 addRoute = (:>)
 
 class SearchCodec search where
@@ -370,7 +376,7 @@ route ::
   forall search url.
   (SearchCodec search, UrlCodec url) =>
   String ->
-  Either String (Route String search url)
+  Either String (Meta String search url)
 route = routeWith Just
 
 routeWith ::
@@ -378,7 +384,7 @@ routeWith ::
   (SearchCodec search, UrlCodec url) =>
   (String -> Maybe sid) ->
   String ->
-  Either String (Route sid search url)
+  Either String (Meta sid search url)
 routeWith decodeSegment patternText = do
   tokens <- parsePattern patternText
   let prefixPaths = literalPathPrefixes tokens
@@ -389,7 +395,7 @@ routeWith decodeSegment patternText = do
   validateParamKeys urlKeys searchKeys
   validateCodecUrlKeys urlKeys codecUrlKeys
   pure
-    Route
+    Meta
       { routePattern = patternText
       , routeSegments = segs
       , routeLeafSegment = lastMaybe segs
@@ -454,7 +460,7 @@ resolvePath router pathText =
       case r of
         RNil ->
           bestSoFar
-        (routeDef :: Route String search url) :> rest ->
+        (routeDef :: Meta String search url) :> rest ->
           let candidate = do
                 tokens <- either (const Nothing) Just (parsePattern (routePattern routeDef))
                 urlMap <- matchPatternTokens tokens inputSegs
@@ -490,7 +496,7 @@ knownRouteLeafSegments router =
               Just sid -> Set.singleton sid
       in Set.union leafSet (knownRouteLeafSegments rest)
 
-resolvedRouteSegments :: Ord sid => Router sid routes -> Route sid search url -> [sid]
+resolvedRouteSegments :: Ord sid => Router sid routes -> Meta sid search url -> [sid]
 resolvedRouteSegments router routeDef =
   let knownLeaves = knownRouteLeafSegments router
       matched = filter (`Set.member` knownLeaves) (routeSegments routeDef)
@@ -502,7 +508,7 @@ resolvedRouteSegments router routeDef =
 locationForRoute ::
   (Ord sid, SearchCodec search, UrlCodec url) =>
   Router sid routes ->
-  Route sid search url ->
+  Meta sid search url ->
   search ->
   url ->
   Maybe (Scene.Location sid)
@@ -524,7 +530,7 @@ locationForRoute router routeDef searchParams urlParams =
 gotoRoute ::
   (Eq sid, Ord sid, SearchCodec search, UrlCodec url) =>
   Scene.GotoMode ->
-  Route sid search url ->
+  Meta sid search url ->
   search ->
   url ->
   Router sid routes ->
@@ -537,7 +543,7 @@ gotoRoute mode routeDef searchParams urlParams router h =
 
 matchRoute ::
   (Eq sid, Ord sid, SearchCodec search, UrlCodec url) =>
-  Route sid search url ->
+  Meta sid search url ->
   Router sid routes ->
   Scene.Location sid ->
   Maybe (search, url)
@@ -557,7 +563,7 @@ matchRoute routeDef router loc =
 
 currentRoute ::
   (Eq sid, Ord sid, SearchCodec search, UrlCodec url) =>
-  Route sid search url ->
+  Meta sid search url ->
   Router sid routes ->
   Scene.History sid ->
   Maybe (search, url)
@@ -568,7 +574,7 @@ type SceneHandler search url a = search -> url -> a
 
 onRouteAt ::
   (Eq sid, Ord sid, SearchCodec search, UrlCodec url) =>
-  Route sid search url ->
+  Meta sid search url ->
   Router sid routes ->
   SceneHandler search url a ->
   Scene.Location sid ->
@@ -579,7 +585,7 @@ onRouteAt routeDef router sceneFn loc = do
 
 onRoute ::
   (Eq sid, Ord sid, SearchCodec search, UrlCodec url) =>
-  Route sid search url ->
+  Meta sid search url ->
   Router sid routes ->
   SceneHandler search url a ->
   Scene.History sid ->

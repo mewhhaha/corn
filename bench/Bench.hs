@@ -432,10 +432,10 @@ runSceneRouterGotoMatch iters =
       in go iters router itemsRoute (Scene.history ["/root"]) 0
     _ -> 0
   where
-    layoutRouteResult :: Either String (Route.Route String () Route.UrlParams)
+    layoutRouteResult :: Either String (Route.Meta String () Route.UrlParams)
     layoutRouteResult = Route.route "/layout"
 
-    itemsRouteResult :: Either String (Route.Route String BenchSearch BenchUrl)
+    itemsRouteResult :: Either String (Route.Meta String BenchSearch BenchUrl)
     itemsRouteResult = Route.route "/layout/items/{:itemId}"
 
     go n router itemsRoute h acc =

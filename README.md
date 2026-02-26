@@ -857,20 +857,20 @@ data ItemUrl = ItemUrl
   { itemId :: String
   } deriving (Eq, Show, Generic, Route.UrlCodec)
 
-layoutRouteResult :: Either String (Route.Route SceneId () Route.UrlParams)
+layoutRouteResult :: Either String (Route.Meta SceneId () Route.UrlParams)
 layoutRouteResult = Route.route "/layout"
 
-itemsRouteResult :: Either String (Route.Route SceneId ItemSearch ItemUrl)
+itemsRouteResult :: Either String (Route.Meta SceneId ItemSearch ItemUrl)
 itemsRouteResult = Route.route "/layout/items/{:itemId}"
 
 routesResult ::
   Either
     String
-    ( Route.Route SceneId ItemSearch ItemUrl
+    ( Route.Meta SceneId ItemSearch ItemUrl
     , Route.Router
         SceneId
-        '[ Route.Route SceneId ItemSearch ItemUrl
-         , Route.Route SceneId () Route.UrlParams
+        '[ Route.Meta SceneId ItemSearch ItemUrl
+         , Route.Meta SceneId () Route.UrlParams
          ]
     )
 routesResult = do
@@ -878,6 +878,20 @@ routesResult = do
   itemsRoute <- itemsRouteResult
   let router = itemsRoute Route.:> layoutRoute Route.:> Route.RNil
   pure (itemsRoute, router)
+```
+
+`Route.Meta` is the schema used by the router. `Route.Route` is the colocated scene entry:
+
+```haskell
+someMeta :: Route.Meta SceneId ItemSearch ItemUrl
+someMeta = ...
+
+itemsSceneRoute :: Route.Route C Msg SceneId ItemSearch ItemUrl
+itemsSceneRoute =
+  Route.Route
+    { meta = someMeta
+    , enter = \search url -> mkItemsScene search url
+    }
 ```
 
 Route behavior:

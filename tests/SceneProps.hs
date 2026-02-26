@@ -143,9 +143,9 @@ decodeSid sidPath =
 
 scene_typed_router_route :: Bool
 scene_typed_router_route =
-  let rootRouteResult :: Either String (Route.Route Sid () Route.UrlParams)
+  let rootRouteResult :: Either String (Route.Meta Sid () Route.UrlParams)
       rootRouteResult = Route.routeWith decodeSid "/root"
-      gameRouteResult :: Either String (Route.Route Sid PlayerSearch PlayerUrl)
+      gameRouteResult :: Either String (Route.Meta Sid PlayerSearch PlayerUrl)
       gameRouteResult = Route.routeWith decodeSid "/root/game/{:playerId}"
   in case (rootRouteResult, gameRouteResult) of
       (Right rootRoute, Right gameRoute) ->
@@ -161,9 +161,9 @@ scene_typed_router_route =
 
 scene_typed_router_rejects_extra_url_keys :: Bool
 scene_typed_router_rejects_extra_url_keys =
-  let rootRouteResult :: Either String (Route.Route Sid () Route.UrlParams)
+  let rootRouteResult :: Either String (Route.Meta Sid () Route.UrlParams)
       rootRouteResult = Route.routeWith decodeSid "/root"
-      gameRouteResult :: Either String (Route.Route Sid PlayerSearch PlayerUrl)
+      gameRouteResult :: Either String (Route.Meta Sid PlayerSearch PlayerUrl)
       gameRouteResult = Route.routeWith decodeSid "/root/game/{:playerId}"
   in case (rootRouteResult, gameRouteResult) of
       (Right rootRoute, Right gameRoute) ->
@@ -180,9 +180,9 @@ scene_typed_router_rejects_extra_url_keys =
 
 scene_route_path_prefix_includes_layout_when_present :: Bool
 scene_route_path_prefix_includes_layout_when_present =
-  let layoutRouteResult :: Either String (Route.Route String () Route.UrlParams)
+  let layoutRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       layoutRouteResult = Route.route "/layout"
-      layoutItemsRouteResult :: Either String (Route.Route String () Route.UrlParams)
+      layoutItemsRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       layoutItemsRouteResult = Route.route "/layout/items"
   in case (layoutRouteResult, layoutItemsRouteResult) of
       (Right layoutRoute, Right layoutItemsRoute) ->
@@ -196,7 +196,7 @@ scene_route_path_prefix_includes_layout_when_present =
 
 scene_route_path_prefix_skips_missing_layout :: Bool
 scene_route_path_prefix_skips_missing_layout =
-  let routeResult :: Either String (Route.Route String () Route.UrlParams)
+  let routeResult :: Either String (Route.Meta String () Route.UrlParams)
       routeResult = Route.route "/layout/items"
   in case routeResult of
       Left _ -> False
@@ -209,9 +209,9 @@ scene_route_path_prefix_skips_missing_layout =
 
 scene_route_path_rejects_extra_url_keys :: Bool
 scene_route_path_rejects_extra_url_keys =
-  let layoutRouteResult :: Either String (Route.Route String () Route.UrlParams)
+  let layoutRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       layoutRouteResult = Route.route "/layout"
-      routeResult :: Either String (Route.Route String () Route.UrlParams)
+      routeResult :: Either String (Route.Meta String () Route.UrlParams)
       routeResult = Route.route "/layout/items/{:id}"
   in case (layoutRouteResult, routeResult) of
       (Right layoutRoute, Right layoutItemsRoute) ->
@@ -231,9 +231,9 @@ scene_route_path_rejects_extra_url_keys =
 
 scene_route_auto_codec_roundtrip :: Bool
 scene_route_auto_codec_roundtrip =
-  let rootRouteResult :: Either String (Route.Route String () Route.UrlParams)
+  let rootRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       rootRouteResult = Route.route "/root"
-      gameRouteResult :: Either String (Route.Route String AutoSearch AutoUrl)
+      gameRouteResult :: Either String (Route.Meta String AutoSearch AutoUrl)
       gameRouteResult = Route.route "/root/game/{:autoPlayerId}"
   in case (rootRouteResult, gameRouteResult) of
       (Right rootRoute, Right gameRoute) ->
@@ -247,9 +247,9 @@ scene_route_auto_codec_roundtrip =
 
 scene_route_scene_handler_receives_validated_params :: Bool
 scene_route_scene_handler_receives_validated_params =
-  let rootRouteResult :: Either String (Route.Route String () Route.UrlParams)
+  let rootRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       rootRouteResult = Route.route "/root"
-      gameRouteResult :: Either String (Route.Route String AutoSearch AutoUrl)
+      gameRouteResult :: Either String (Route.Meta String AutoSearch AutoUrl)
       gameRouteResult = Route.route "/root/game/{:autoPlayerId}"
   in case (rootRouteResult, gameRouteResult) of
       (Right rootRoute, Right gameRoute) ->
@@ -280,9 +280,9 @@ scene_route_scene_handler_receives_validated_params =
 
 scene_route_specificity_prefers_literal :: Bool
 scene_route_specificity_prefers_literal =
-  let exactRouteResult :: Either String (Route.Route String () Route.UrlParams)
+  let exactRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       exactRouteResult = Route.route "/a/b/c"
-      dynamicRouteResult :: Either String (Route.Route String () Route.UrlParams)
+      dynamicRouteResult :: Either String (Route.Meta String () Route.UrlParams)
       dynamicRouteResult = Route.route "/a/b/{:id}"
   in case (exactRouteResult, dynamicRouteResult) of
       (Right exactRoute, Right dynamicRoute) ->
