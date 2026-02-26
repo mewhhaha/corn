@@ -16,6 +16,7 @@ cd examples
 cabal run corn-examples -- platformer
 cabal run corn-examples -- horde-survival
 cabal run corn-examples -- bullet-hell
+cabal run corn-examples -- scenes-navigation
 ```
 
 ## Concepts
@@ -23,6 +24,7 @@ cabal run corn-examples -- bullet-hell
 - `platformer`: single-actor gravity + periodic jump impulse loop.
 - `horde-survival`: moving player target with mob chase/attrition.
 - `bullet-hell`: periodic radial bullet burst spawning + TTL cleanup.
+- `scenes-navigation`: single-stack scene routing with history-style goto/back/forward.
 
 ## Modeling Notes
 

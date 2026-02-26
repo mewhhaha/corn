@@ -10,7 +10,9 @@ executable corn-examples
     other-modules:    Examples.Platformer
                       Examples.HordeSurvival
                       Examples.BulletHell
+                      Examples.ScenesNavigation
     ghc-options:      -Wall
     build-depends:    base ^>=4.21.0.0
+                      , containers
                       , corn
     default-language: GHC2024

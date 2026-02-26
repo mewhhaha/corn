@@ -22,6 +22,8 @@ library
     exposed-modules:  Engine.Data.FRP
                       Engine.Data.ECS
                       Engine.Data.Program
+                      Engine.Data.Scene
+                      Engine.Data.Route
                       Engine.Data.Input
                       Engine.Data.Transform
     -- other-modules:
@@ -43,6 +45,7 @@ test-suite corn-tests
     other-modules:    FRPProps
                       ECSProps
                       ProgramProps
+                      SceneProps
     build-depends:    base ^>=4.21.0.0
                       , array
                       , containers

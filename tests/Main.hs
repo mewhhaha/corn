@@ -6,6 +6,7 @@ module Main where
 import ECSProps
 import FRPProps
 import ProgramProps
+import SceneProps
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.FRP as F
 import GHC.Generics (Generic)
@@ -102,6 +103,21 @@ main = do
   assert "await sticky inline applicative" program_await_sticky_inline_applicative
   assert "replay from inputs" program_replay_from_inputs
   assert "snapshot roundtrip (replay-backed graph)" program_snapshot_roundtrip
+  assert "scene stack push/pop roundtrip" scene_push_pop_roundtrip
+  assert "scene nested path focus" scene_nested_path_focus
+  assert "scene replace primary stack" scene_replace_primary_stack
+  assert "scene history goto/back segments" scene_history_push_pop_segments
+  assert "scene history back/forward" scene_history_back_forward
+  assert "scene history clears forward on new nav" scene_history_back_clears_forward_on_new_nav
+  assert "scene historyAt params" scene_history_pathwith_params
+  assert "scene typed router route" scene_typed_router_route
+  assert "scene typed router rejects extra url keys" scene_typed_router_rejects_extra_url_keys
+  assert "scene route includes layout prefix when route exists" scene_route_path_prefix_includes_layout_when_present
+  assert "scene route skips missing layout prefix" scene_route_path_prefix_skips_missing_layout
+  assert "scene route rejects extra url keys" scene_route_path_rejects_extra_url_keys
+  assert "scene route auto codec roundtrip" scene_route_auto_codec_roundtrip
+  assert "scene handler gets validated route params" scene_route_scene_handler_receives_validated_params
+  assert "scene route specificity prefers literal over param" scene_route_specificity_prefers_literal
 
   results <-
     sequence

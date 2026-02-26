@@ -12,6 +12,8 @@ Suggested imports (to avoid name clashes with Prelude):
 import qualified Engine.Data.FRP as F
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.Program as S
+import qualified Engine.Data.Scene as Scene
+import qualified Engine.Data.Route as Route
 import qualified Engine.Data.Input as I
 import GHC.Generics (Generic)
 import qualified Engine.Data.Transform as T
@@ -26,6 +28,7 @@ Runnable genre concepts live under `examples/`:
 ```sh
 cd examples
 cabal run corn-examples -- all
+cabal run corn-examples -- scenes-navigation
 ```
 
 ## Philosophy (the short version)
@@ -47,11 +50,20 @@ Benchmarks focus on quick, game‑like scenarios so iteration stays fast.
 - `game/flock-10k`: 1 lead pigeon + 10k flock birds (simple chase + damage).
 - `program/10k/eachm`: same workload as `game/flock-10k` with primary engine target name.
 - `program/10k+1/eachm`: same as `program/10k/eachm` but with 10k+1 entities.
+- `scene/history/nav-cycle`: path edits + `back`/`forward` history traversal.
+- `scene/router/goto-match`: typed route `gotoRoute` + `currentRoute` match/decode.
+- `scene/path/goto-cycle`: single-segment path replacements with `goto`.
 
 Run:
 
 ```sh
 cabal bench corn-bench --ghc-options=-O2 --benchmark-options='-m glob <benchmark-name> +RTS -N -s -RTS'
+```
+
+Run all scene benchmarks:
+
+```sh
+cabal bench corn-bench --ghc-options=-O2 --benchmark-options='-m glob scene/*/* +RTS -N -s -RTS'
 ```
 
 Run allocation comparisons with fixed iterations:
@@ -537,6 +549,7 @@ optQ = do
 ### 5) Auto-derived record queries
 
 ```haskell
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
@@ -793,6 +806,138 @@ bumpScore e = S.at e (S.update (\(Score n) -> Score (n + 1)))
 
 resetScore :: E.Entity -> Patch
 resetScore e = S.at e (S.update (const (Score 0))) -- or S.at e (S.set (Score 0))
+```
+
+## Scene Routing (Single Stack)
+
+Corn now recommends one navigation stack as the primary model:
+`[SceneId]` plus browser-like history (`current`, `canGoBack`, `canGoForward`).
+
+```haskell
+import qualified Engine.Data.Scene as Scene
+import qualified Engine.Data.Route as Route
+
+type SceneId = String
+```
+
+### 1) Path/history operations
+
+```haskell
+h0 = Scene.history ["/main-menu"]
+h1 = Scene.goto Scene.Push "/options" h0
+h2 = Scene.back h1
+h3 = Scene.goto Scene.Push "/game" h2
+h4 = Scene.back h3
+h5 = Scene.forward h4
+
+Scene.locationSegments (Scene.current h5)
+-- ["/game"]
+```
+
+Use `Push` when you want history entries (`back`/`forward`),
+and `Replace` for in-place path edits.
+Use plain path segments for history; URL params and search params are modeled on routes.
+
+### 2) Typed routes with derived params (no encode/decode boilerplate)
+
+```haskell
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+
+import GHC.Generics (Generic)
+import qualified Engine.Data.Route as Route
+
+type SceneId = String
+
+data ItemSearch = ItemSearch
+  { tab :: [String]
+  } deriving (Eq, Show, Generic, Route.SearchCodec)
+
+data ItemUrl = ItemUrl
+  { itemId :: String
+  } deriving (Eq, Show, Generic, Route.UrlCodec)
+
+layoutRouteResult :: Either String (Route.Route SceneId () Route.UrlParams)
+layoutRouteResult = Route.route "/layout"
+
+itemsRouteResult :: Either String (Route.Route SceneId ItemSearch ItemUrl)
+itemsRouteResult = Route.route "/layout/items/{:itemId}"
+
+routesResult ::
+  Either
+    String
+    ( Route.Route SceneId ItemSearch ItemUrl
+    , Route.Router
+        SceneId
+        '[ Route.Route SceneId ItemSearch ItemUrl
+         , Route.Route SceneId () Route.UrlParams
+         ]
+    )
+routesResult = do
+  layoutRoute <- layoutRouteResult
+  itemsRoute <- itemsRouteResult
+  let router = itemsRoute Route.:> layoutRoute Route.:> Route.RNil
+  pure (itemsRoute, router)
+```
+
+Route behavior:
+- Path param keys come from the route pattern (`{:itemId}` or `:itemId`).
+- Search/url record field names define allowed key sets.
+- `gotoRoute` / `currentRoute` only succeed when keys match the route shape exactly.
+- `gotoPath` resolves by specificity: more literal segments win.
+  Example: `/a/b/c` beats `/a/b/{:id}` for `/a/b/c`, while `/a/b/e` matches `/a/b/{:id}`.
+
+Scene function with already-validated params:
+
+```haskell
+itemScene :: ItemSearch -> ItemUrl -> String
+itemScene (ItemSearch tabs) (ItemUrl ident) =
+  "item=" <> ident <> ", tab=" <> show tabs
+
+renderCurrent :: Scene.History SceneId -> Maybe String
+renderCurrent h =
+  case routesResult of
+    Right (itemsRoute, router) ->
+      Route.onRoute itemsRoute router itemScene h
+    _ -> Nothing
+```
+
+`onRoute` / `onRouteAt` call your scene function only when route + params match.
+`Router` is an HList-style GADT, and `:>` statically builds its type-level route list.
+
+### 3) Scene runtime is just world + graph (runnable unit)
+
+```haskell
+import qualified Engine.Data.ECS as E
+import qualified Engine.Data.Program as S
+
+type C = ...
+type Msg = ...
+
+scene0 :: Scene.SceneRuntime C Msg
+scene0 = Scene.sceneRuntime world0 graph0
+
+(scene1, outbox) = Scene.runScene 0.016 inbox scene0
+```
+
+Router-driven host pattern:
+
+```haskell
+data Msg = UiOpenOptions | NavOpenOptions deriving (Eq, Show)
+data Target = ToRouter | ToScene SceneId deriving (Eq, Show)
+data Envelope = Envelope SceneId Target Msg deriving (Eq, Show)
+
+mainMenuProg :: S.ProgramM c Envelope ()
+mainMenuProg = do
+  _ <- S.await (\(Envelope _ _ m) -> m == UiOpenOptions)
+  S.send [Envelope "/main-menu" ToRouter NavOpenOptions]
+```
+
+Runnable prototype:
+
+```sh
+cd examples
+cabal run corn-examples -- scenes-navigation
 ```
 
 ---

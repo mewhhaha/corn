@@ -4,6 +4,7 @@ import System.Environment (getArgs)
 import qualified Examples.BulletHell as BulletHell
 import qualified Examples.HordeSurvival as HordeSurvival
 import qualified Examples.Platformer as Platformer
+import qualified Examples.ScenesNavigation as ScenesNavigation
 
 type Concept = (String, IO ())
 
@@ -12,6 +13,7 @@ concepts =
   [ ("platformer", Platformer.runConcept)
   , ("horde-survival", HordeSurvival.runConcept)
   , ("bullet-hell", BulletHell.runConcept)
+  , ("scenes-navigation", ScenesNavigation.runConcept)
   ]
 
 runOne :: Concept -> IO ()
