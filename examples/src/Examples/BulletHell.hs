@@ -9,6 +9,7 @@ import GHC.Generics (Generic)
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.FRP as F
 import qualified Engine.Data.Program as S
+import Control.Monad (when)
 
 data Emitter = Emitter
   deriving (Eq, Show)
@@ -89,9 +90,7 @@ bulletHellProg = do
         case emitters of
           (_, EmitterRow _ pos) : _ -> pos
           [] -> Pos 0 0
-  if fireNow
-    then S.world (spawnBurstPatch origin)
-    else pure ()
+  when fireNow $ S.world (spawnBurstPatch origin)
   _ <- S.await $
     S.eachM @BulletRow $ \(BulletRow _ (Pos x y) (Vel vx vy) (Life life)) -> do
       let lifeNext = life - dt

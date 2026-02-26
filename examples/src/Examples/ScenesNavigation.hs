@@ -55,13 +55,13 @@ data Envelope = Envelope
 newtype TickCount = TickCount Int
   deriving (Eq, Show)
 
-data C
+newtype C
   = CTickCount TickCount
   deriving (Generic)
 
 instance E.ComponentId C
 
-data TickRow = TickRow
+newtype TickRow = TickRow
   { trTickCount :: TickCount
   } deriving (Generic)
 
