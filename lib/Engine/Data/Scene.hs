@@ -26,7 +26,7 @@ module Engine.Data.Scene
   , back
   , forward
   , SceneRuntime(..)
-  , sceneRuntime
+  , mkScene
   , runScene
   ) where
 
@@ -183,8 +183,8 @@ data SceneRuntime c msg = SceneRuntime
   , sceneRuntimeGraph :: !(S.Graph c msg)
   }
 
-sceneRuntime :: E.World c -> S.Graph c msg -> SceneRuntime c msg
-sceneRuntime = SceneRuntime
+mkScene :: E.World c -> S.Graph c msg -> SceneRuntime c msg
+mkScene = SceneRuntime
 
 runScene :: DTime -> Events msg -> SceneRuntime c msg -> (SceneRuntime c msg, Events msg)
 runScene dt inbox rt0 =

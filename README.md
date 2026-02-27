@@ -52,6 +52,7 @@ Benchmarks focus on quick, game‑like scenarios so iteration stays fast.
 - `program/10k+1/eachm`: same as `program/10k/eachm` but with 10k+1 entities.
 - `scene/history/nav-cycle`: path edits + `back`/`forward` history traversal.
 - `scene/router/goto-match`: typed route `gotoRoute` + `currentRoute` match/decode.
+- `scene/router/simple-enter`: static `Route.Simple` `gotoPath` + `enterPath`/`enterPathWithSearch`.
 - `scene/path/goto-cycle`: single-segment path replacements with `goto`.
 
 Run:
@@ -815,7 +816,6 @@ Corn now recommends one navigation stack as the primary model:
 
 ```haskell
 import qualified Engine.Data.Scene as Scene
-import qualified Engine.Data.Route as Route
 
 type SceneId = String
 ```
@@ -838,86 +838,83 @@ Use `Push` when you want history entries (`back`/`forward`),
 and `Replace` for in-place path edits.
 Use plain path segments for history; URL params and search params are modeled on routes.
 
-### 2) Typed routes with derived params (no encode/decode boilerplate)
+### 2) Static router DSL (colocated route enter functions)
 
 ```haskell
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeApplications #-}
 
 import GHC.Generics (Generic)
-import qualified Engine.Data.Route as Route
+import qualified Data.Map.Strict as Map
+import qualified Engine.Data.Route as Core
+import qualified Engine.Data.Route.Simple as Route
+import qualified Engine.Data.Scene as Scene
 
 type SceneId = String
 
-data ItemSearch = ItemSearch
+data PlayerSearch = PlayerSearch
   { tab :: [String]
-  } deriving (Eq, Show, Generic, Route.SearchCodec)
+  } deriving (Eq, Show, Generic, Core.SearchCodec)
 
-data ItemUrl = ItemUrl
-  { itemId :: String
-  } deriving (Eq, Show, Generic, Route.UrlCodec)
+playerEntry ::
+  Route.Params "/main-menu/players/{:id}" ->
+  PlayerSearch ->
+  Scene.SceneRuntime C Msg
+playerEntry params (PlayerSearch tabs) =
+  let playerId = Route.param @"id" params
+  in mkPlayersScene playerId tabs
 
-layoutRouteResult :: Either String (Route.Meta SceneId () Route.UrlParams)
-layoutRouteResult = Route.route "/layout"
+routes :: Route.Routes C Msg
+routes =
+  Route.route @"/main-menu" (\_ () -> mkMainMenuScene) (Just ())
+    Route.:> Route.route @"/options" (\_ () -> mkOptionsScene) (Just ())
+    Route.:> Route.route @"/main-menu/players/{:id}" playerEntry (Just (PlayerSearch ["summary"]))
+    Route.:> Route.EmptyRoutes
 
-itemsRouteResult :: Either String (Route.Meta SceneId ItemSearch ItemUrl)
-itemsRouteResult = Route.route "/layout/items/{:itemId}"
+router :: Route.Router C Msg
+router =
+  case Route.createRouter routes of
+    Right r -> r
+    Left err -> error err
 
-routesResult ::
-  Either
-    String
-    ( Route.Meta SceneId ItemSearch ItemUrl
-    , Route.Router
-        SceneId
-        '[ Route.Meta SceneId ItemSearch ItemUrl
-         , Route.Meta SceneId () Route.UrlParams
-         ]
-    )
-routesResult = do
-  layoutRoute <- layoutRouteResult
-  itemsRoute <- itemsRouteResult
-  let router = itemsRoute Route.:> layoutRoute Route.:> Route.RNil
-  pure (itemsRoute, router)
-```
+h1 :: Scene.History SceneId
+h1 = Route.gotoPath Scene.Push "/options" router (Scene.history ["/main-menu"])
 
-`Route.Meta` is the schema used by the router. `Route.Route` is the colocated scene entry:
+defaultPlayersScene :: Maybe (Scene.SceneRuntime C Msg)
+defaultPlayersScene = Route.enterPath router "/main-menu/players/42"
 
-```haskell
-someMeta :: Route.Meta SceneId ItemSearch ItemUrl
-someMeta = ...
-
-itemsSceneRoute :: Route.Route C Msg SceneId ItemSearch ItemUrl
-itemsSceneRoute =
-  Route.Route
-    { meta = someMeta
-    , enter = \search url -> mkItemsScene search url
-    }
+explicitPlayersScene :: Maybe (Scene.SceneRuntime C Msg)
+explicitPlayersScene =
+  Route.enterPathWithSearch
+    router
+    "/main-menu/players/42"
+    (Map.fromList [("tab", ["stats"])])
 ```
 
 Route behavior:
-- Path param keys come from the route pattern (`{:itemId}` or `:itemId`).
-- Search/url record field names define allowed key sets.
-- `gotoRoute` / `currentRoute` only succeed when keys match the route shape exactly.
+- Path param keys come from the route pattern (`{:id}` or `:id`).
+- Search keys come from your search record field names (`SearchCodec`).
+- `enterPath` uses route defaults (`params = Just ...`) when present.
+- `enterPathWithSearch` enforces exact search-key matching.
 - `gotoPath` resolves by specificity: more literal segments win.
   Example: `/a/b/c` beats `/a/b/{:id}` for `/a/b/c`, while `/a/b/e` matches `/a/b/{:id}`.
 
 Scene function with already-validated params:
 
 ```haskell
-itemScene :: ItemSearch -> ItemUrl -> String
-itemScene (ItemSearch tabs) (ItemUrl ident) =
-  "item=" <> ident <> ", tab=" <> show tabs
-
-renderCurrent :: Scene.History SceneId -> Maybe String
-renderCurrent h =
-  case routesResult of
-    Right (itemsRoute, router) ->
-      Route.onRoute itemsRoute router itemScene h
-    _ -> Nothing
+playerEntry ::
+  Route.Params "/main-menu/players/{:id}" ->
+  PlayerSearch ->
+  Scene.SceneRuntime C Msg
+playerEntry params search =
+  let playerId = Route.param @"id" params
+  in mkPlayersScene playerId (tab search)
 ```
 
-`onRoute` / `onRouteAt` call your scene function only when route + params match.
-`Router` is an HList-style GADT, and `:>` statically builds its type-level route list.
+Use `Engine.Data.Route` directly when you need advanced tree construction (`RouteTree`,
+`compileTree`) or low-level typed matching helpers (`Meta`, `gotoRoute`, `currentRoute`).
 
 ### 3) Scene runtime is just world + graph (runnable unit)
 
@@ -929,7 +926,7 @@ type C = ...
 type Msg = ...
 
 scene0 :: Scene.SceneRuntime C Msg
-scene0 = Scene.sceneRuntime world0 graph0
+scene0 = Scene.mkScene world0 graph0
 
 (scene1, outbox) = Scene.runScene 0.016 inbox scene0
 ```
@@ -946,6 +943,9 @@ mainMenuProg = do
   _ <- S.await (\(Envelope _ _ m) -> m == UiOpenOptions)
   S.send [Envelope "/main-menu" ToRouter NavOpenOptions]
 ```
+
+`examples/src/Examples/ScenesNavigation.hs` uses this pattern with static scene-route
+entries and avoids `case sid of ...` scene dispatch.
 
 Runnable prototype:
 

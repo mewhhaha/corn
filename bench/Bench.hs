@@ -8,12 +8,14 @@ module Main where
 import Criterion.Main
 import Data.Bits (bit, (.|.))
 import Data.List (foldl')
+import qualified Data.Map.Strict as Map
 import qualified Data.Foldable as Foldable
 import GHC.Generics (Generic)
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.FRP as F
 import qualified Engine.Data.Program as S
 import qualified Engine.Data.Route as Route
+import qualified Engine.Data.Route.Simple as RouteS
 import qualified Engine.Data.Scene as Scene
 
 data Pos = Pos {-# UNPACK #-} !Double {-# UNPACK #-} !Double
@@ -458,6 +460,56 @@ runSceneRouterGotoMatch iters =
               h2 = Scene.goto Scene.Replace "/layout" h1
           in go (n - 1) router itemsRoute h2 (acc + matched)
 
+emptyBenchScene :: Scene.SceneRuntime C UiMsg
+emptyBenchScene =
+  Scene.mkScene
+    (E.emptyWorld :: E.World C)
+    (S.graph (pure ()))
+
+simpleBenchRoutes :: RouteS.Routes C UiMsg
+simpleBenchRoutes =
+  RouteS.route @"/layout" (\_ () -> emptyBenchScene) (Just ())
+    RouteS.:> RouteS.route
+      @"/layout/items/{:id}"
+      (\params (BenchSearch tabs) ->
+        let item = RouteS.param @"id" params
+        in item `seq` length tabs `seq` emptyBenchScene
+      )
+      (Just (BenchSearch ["stats"]))
+    RouteS.:> RouteS.EmptyRoutes
+
+runSceneSimpleRouterEnter :: Int -> Int
+runSceneSimpleRouterEnter iters =
+  case RouteS.createRouter simpleBenchRoutes of
+    Left _ -> 0
+    Right router ->
+      go iters router (Scene.history ["/layout"]) 0
+  where
+    go n router h acc =
+      if n <= 0
+        then acc
+        else
+          let h1 = RouteS.gotoPath Scene.Push "/layout/items/42" router h
+              enteredDefault =
+                case RouteS.enterPath router "/layout/items/42" of
+                  Just _ -> 1
+                  Nothing -> 0
+              enteredOverride =
+                case
+                  RouteS.enterPathWithSearch
+                    router
+                    "/layout/items/42"
+                    (Map.fromList [("tab", ["stats"])])
+                of
+                  Just _ -> 1
+                  Nothing -> 0
+              h2 = Scene.back h1
+              score =
+                length (Scene.locationSegments (Scene.current h2))
+                  + enteredDefault
+                  + enteredOverride
+          in go (n - 1) router h2 (acc + score)
+
 main :: IO ()
 main = defaultMain
   [ bgroup "game"
@@ -503,6 +555,8 @@ main = defaultMain
           nf runSceneHistoryNavCycle (5000 :: Int)
       , bench "router/goto-match" $
           nf runSceneRouterGotoMatch (5000 :: Int)
+      , bench "router/simple-enter" $
+          nf runSceneSimpleRouterEnter (5000 :: Int)
       , bench "path/goto-cycle" $
           nf runScenePathGotoCycle (5000 :: Int)
       ]

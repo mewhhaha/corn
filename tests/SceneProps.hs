@@ -1,6 +1,8 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE TypeApplications #-}
 
 module SceneProps
   ( scene_push_pop_roundtrip
@@ -18,12 +20,17 @@ module SceneProps
   , scene_route_auto_codec_roundtrip
   , scene_route_scene_handler_receives_validated_params
   , scene_route_specificity_prefers_literal
+  , scene_route_tree_compile_and_goto
+  , scene_route_simple_dsl
   ) where
 
 import Prelude
 
 import qualified Data.Map.Strict as Map
+import qualified Engine.Data.ECS as E
+import qualified Engine.Data.Program as S
 import qualified Engine.Data.Route as Route
+import qualified Engine.Data.Route.Simple as Simple
 import qualified Engine.Data.Scene as Scene
 import GHC.Generics (Generic)
 
@@ -54,6 +61,20 @@ data AutoUrl = AutoUrl
   { autoPlayerId :: String
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (Route.UrlCodec)
+
+newtype SimpleSearch = SimpleSearch
+  { mode :: [String]
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (Route.SearchCodec)
+
+newtype SimpleTag = SimpleTag String
+  deriving stock (Eq, Show, Generic)
+
+data SimpleC
+  = CSimpleTag SimpleTag
+  deriving stock (Generic)
+
+instance E.ComponentId SimpleC
 
 segmentsOf :: Scene.History Sid -> [Sid]
 segmentsOf = Scene.locationSegments . Scene.current
@@ -295,3 +316,70 @@ scene_route_specificity_prefers_literal =
             && Route.currentRoute dynamicRoute router h2 == Just ((), Map.fromList [("id", "e")])
             && Route.currentRoute exactRoute router h2 == Nothing
       _ -> False
+
+scene_route_tree_compile_and_goto :: Bool
+scene_route_tree_compile_and_goto =
+  let treeResult =
+        sequence
+          [ Route.routeLeafAt @() @() "/a/b/c" (\() () -> error "unused scene")
+          , Route.routeLeafAt @() @Route.UrlParams "/a/b/{:id}" (\() _ -> error "unused scene")
+          ]
+  in case treeResult of
+      Left _ -> False
+      Right trees ->
+        let compiled = Route.compileTree trees
+            locExact = Route.resolveCompiledPath compiled "/a/b/c"
+            locDyn = Route.resolveCompiledPath compiled "/a/b/e"
+            h0 = Scene.history ["/start"]
+            h1 = Route.gotoCompiledPath Scene.Push "/a/b/c" compiled h0
+            h2 = Route.gotoCompiledPath Scene.Push "/a/b/e" compiled h1
+        in case (locExact, locDyn) of
+            (Just l1, Just l2) ->
+              Scene.current h1 == l1
+                && Scene.current h2 == l2
+                && Scene.locationUrlParams l1 == Map.empty
+                && Scene.locationUrlParams l2 == Map.fromList [("id", "e")]
+            _ -> False
+
+mkSimpleScene :: String -> Scene.SceneRuntime SimpleC ()
+mkSimpleScene tag =
+  let (_, w1) = E.spawn (SimpleTag tag) (E.emptyWorld :: E.World SimpleC)
+      g1 = S.graph (pure ())
+  in Scene.mkScene w1 g1
+
+sceneTag :: Scene.SceneRuntime SimpleC () -> Maybe String
+sceneTag rt =
+  let q = (E.comp :: E.Query SimpleC SimpleTag)
+  in case E.runq q (Scene.sceneRuntimeWorld rt) of
+    (_, SimpleTag tag) : _ -> Just tag
+    [] -> Nothing
+
+simpleRoutes :: Simple.Routes SimpleC ()
+simpleRoutes =
+  Simple.route @"/hello/world/{:id}"
+    (\params (SimpleSearch tabs) ->
+      let ident = Simple.param @"id" params
+      in mkSimpleScene (ident <> ":" <> show tabs)
+    )
+    (Just (SimpleSearch ["stats"]))
+    Simple.:> Simple.EmptyRoutes
+
+scene_route_simple_dsl :: Bool
+scene_route_simple_dsl =
+  case Simple.createRouter simpleRoutes of
+    Left _ -> False
+    Right router ->
+      let h0 = Scene.history ["/start"]
+          h1 = Simple.gotoPath Scene.Push "/hello/world/42" router h0
+          loc = Scene.current h1
+          enteredDefault = sceneTag =<< Simple.enterPath router "/hello/world/42"
+          enteredOverride =
+            sceneTag =<<
+              Simple.enterPathWithSearch
+                router
+                "/hello/world/42"
+                (Map.fromList [("mode", ["advanced"])])
+      in Scene.locationSegments loc == ["/hello/world"]
+          && Scene.locationUrlParams loc == Map.fromList [("id", "42")]
+          && enteredDefault == Just "42:[\"stats\"]"
+          && enteredOverride == Just "42:[\"advanced\"]"

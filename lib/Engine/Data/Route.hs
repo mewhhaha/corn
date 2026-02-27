@@ -12,6 +12,19 @@ module Engine.Data.Route
   , UrlParams
   , Meta(..)
   , Route(..)
+  , AnyRoute(..)
+  , RouteTree(..)
+  , SomeRouter
+  , CompiledTree(..)
+  , routeBranch
+  , routeLeaf
+  , routeBranchAt
+  , routeLeafAt
+  , sceneBranchAt
+  , sceneLeafAt
+  , compileTree
+  , resolveCompiledPath
+  , gotoCompiledPath
   , Router(RNil, (:>))
   , emptyRouter
   , addRoute
@@ -60,6 +73,139 @@ data Route c msg sid search url = Route
   { meta :: Meta sid search url
   , enter :: search -> url -> Scene.SceneRuntime c msg
   }
+
+data AnyRoute c msg sid where
+  AnyRoute ::
+    (SearchCodec search, UrlCodec url) =>
+    Route c msg sid search url ->
+    AnyRoute c msg sid
+
+data RouteTree c msg sid = RouteTree
+  { treeRoute :: AnyRoute c msg sid
+  , treeChildren :: [RouteTree c msg sid]
+  }
+
+data SomeRouter sid where
+  SomeRouter :: Router sid routes -> SomeRouter sid
+
+data CompiledTree c msg sid = CompiledTree
+  { compiledRoots :: [RouteTree c msg sid]
+  , compiledRoutes :: [AnyRoute c msg sid]
+  , compiledRouter :: SomeRouter sid
+  }
+
+routeBranch ::
+  (SearchCodec search, UrlCodec url) =>
+  Meta sid search url ->
+  (search -> url -> Scene.SceneRuntime c msg) ->
+  [RouteTree c msg sid] ->
+  RouteTree c msg sid
+routeBranch routeMeta mkScene children =
+  RouteTree
+    { treeRoute = AnyRoute (Route routeMeta mkScene)
+    , treeChildren = children
+    }
+
+routeLeaf ::
+  (SearchCodec search, UrlCodec url) =>
+  Meta sid search url ->
+  (search -> url -> Scene.SceneRuntime c msg) ->
+  RouteTree c msg sid
+routeLeaf routeMeta mkScene =
+  routeBranch routeMeta mkScene []
+
+routeBranchAt ::
+  forall search url c msg.
+  (SearchCodec search, UrlCodec url) =>
+  String ->
+  (search -> url -> Scene.SceneRuntime c msg) ->
+  [RouteTree c msg String] ->
+  Either String (RouteTree c msg String)
+routeBranchAt patternText mkScene children = do
+  routeMeta <- route @search @url patternText
+  pure (routeBranch routeMeta mkScene children)
+
+routeLeafAt ::
+  forall search url c msg.
+  (SearchCodec search, UrlCodec url) =>
+  String ->
+  (search -> url -> Scene.SceneRuntime c msg) ->
+  Either String (RouteTree c msg String)
+routeLeafAt patternText mkScene =
+  routeBranchAt @search @url patternText mkScene []
+
+sceneBranchAt ::
+  String ->
+  Scene.SceneRuntime c msg ->
+  [RouteTree c msg String] ->
+  Either String (RouteTree c msg String)
+sceneBranchAt patternText sceneRt children =
+  routeBranchAt @() @() patternText (\() () -> sceneRt) children
+
+sceneLeafAt ::
+  String ->
+  Scene.SceneRuntime c msg ->
+  Either String (RouteTree c msg String)
+sceneLeafAt patternText sceneRt =
+  sceneBranchAt patternText sceneRt []
+
+data SomeMeta sid where
+  SomeMeta ::
+    (SearchCodec search, UrlCodec url) =>
+    Meta sid search url ->
+    SomeMeta sid
+
+anyRouteMeta :: AnyRoute c msg sid -> SomeMeta sid
+anyRouteMeta anyRoute =
+  case anyRoute of
+    AnyRoute routeEntry ->
+      SomeMeta (meta routeEntry)
+
+flattenTree :: [RouteTree c msg sid] -> [AnyRoute c msg sid]
+flattenTree roots = concatMap go roots
+  where
+    go treeNode =
+      treeRoute treeNode : flattenTree (treeChildren treeNode)
+
+buildSomeRouter :: [SomeMeta sid] -> SomeRouter sid
+buildSomeRouter metas =
+  case metas of
+    [] -> SomeRouter RNil
+    SomeMeta routeMeta : rest ->
+      case buildSomeRouter rest of
+        SomeRouter routerRest ->
+          SomeRouter (routeMeta :> routerRest)
+
+compileTree :: [RouteTree c msg sid] -> CompiledTree c msg sid
+compileTree roots =
+  let routes = flattenTree roots
+      metas = map anyRouteMeta routes
+  in
+    CompiledTree
+      { compiledRoots = roots
+      , compiledRoutes = routes
+      , compiledRouter = buildSomeRouter metas
+      }
+
+resolveCompiledPath ::
+  CompiledTree c msg String ->
+  String ->
+  Maybe (Scene.Location String)
+resolveCompiledPath compiled pathText =
+  case compiledRouter compiled of
+    SomeRouter router ->
+      resolvePath router pathText
+
+gotoCompiledPath ::
+  Scene.GotoMode ->
+  String ->
+  CompiledTree c msg String ->
+  Scene.History String ->
+  Scene.History String
+gotoCompiledPath mode pathText compiled h =
+  case compiledRouter compiled of
+    SomeRouter router ->
+      gotoPath mode pathText router h
 
 data Router sid routes where
   RNil :: Router sid '[]

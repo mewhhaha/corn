@@ -118,6 +118,8 @@ main = do
   assert "scene route auto codec roundtrip" scene_route_auto_codec_roundtrip
   assert "scene handler gets validated route params" scene_route_scene_handler_receives_validated_params
   assert "scene route specificity prefers literal over param" scene_route_specificity_prefers_literal
+  assert "scene route tree compiles and goto uses compiled router" scene_route_tree_compile_and_goto
+  assert "scene simple route dsl compiles and validates params" scene_route_simple_dsl
 
   results <-
     sequence

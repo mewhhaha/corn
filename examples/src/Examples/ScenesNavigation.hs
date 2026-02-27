@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -7,18 +8,21 @@ module Examples.ScenesNavigation
 
 import Prelude
 
+import Control.Monad (void)
+import Data.Foldable (traverse_)
 import Data.List (intercalate)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.Program as S
+import qualified Engine.Data.Route.Simple as RouteS
 import qualified Engine.Data.Scene as Scene
 
 type SceneId = String
 
-sceneRoot :: SceneId
-sceneRoot = "/root"
+hostSender :: SceneId
+hostSender = "/host"
 
 sceneMainMenu :: SceneId
 sceneMainMenu = "/main-menu"
@@ -32,7 +36,6 @@ sceneGame = "/game"
 data Target
   = ToScene SceneId
   | ToRouter
-  | Broadcast
   deriving (Eq, Show)
 
 data Msg
@@ -78,76 +81,102 @@ frameDt :: Double
 frameDt = 0.016
 
 tickProg :: Program ()
-tickProg = do
-  _ <- S.await $
+tickProg =
+  void . S.await $
     S.each @TickRow $ \(TickRow (TickCount n)) ->
       S.set (TickCount (n + 1))
-  pure ()
+
+awaitMsg :: Msg -> Program ()
+awaitMsg msg = void (S.await (eventIs msg))
+
+sendRouterMsg :: SceneId -> Msg -> Program ()
+sendRouterMsg from msg =
+  S.send [Envelope from ToRouter msg]
 
 mainMenuOpenProg :: Program ()
 mainMenuOpenProg = do
-  _ <- S.await (eventIs UiOpenOptions)
-  S.send [Envelope sceneMainMenu ToRouter NavOpenOptions]
+  awaitMsg UiOpenOptions
+  sendRouterMsg sceneMainMenu NavOpenOptions
 
 mainMenuStartProg :: Program ()
 mainMenuStartProg = do
-  _ <- S.await (eventIs UiStartGame)
-  S.send [Envelope sceneMainMenu ToRouter NavGotoGame]
+  awaitMsg UiStartGame
+  sendRouterMsg sceneMainMenu NavGotoGame
 
 optionsCloseProg :: Program ()
 optionsCloseProg = do
-  _ <- S.await (eventIs UiCloseTop)
-  S.send [Envelope sceneOptions ToRouter NavBack]
+  awaitMsg UiCloseTop
+  sendRouterMsg sceneOptions NavBack
 
 gameBackProg :: Program ()
 gameBackProg = do
-  _ <- S.await (eventIs UiBackToMenu)
-  S.send [Envelope sceneGame ToRouter NavGotoMenu]
+  awaitMsg UiBackToMenu
+  sendRouterMsg sceneGame NavGotoMenu
 
 eventIs :: Msg -> Envelope -> Bool
 eventIs m env = envMsg env == m
 
-mkRuntime :: SceneId -> Scene.SceneRuntime C Envelope
-mkRuntime sid =
+mkRuntime :: [Program ()] -> Scene.SceneRuntime C Envelope
+mkRuntime scenePrograms =
   let (_, w1) = E.spawn (TickCount 0) (E.emptyWorld :: World)
       g1 =
         S.graph $ do
           _ <- S.program tickProg
-          case sid of
-            "/main-menu" -> do
-              _ <- S.program mainMenuOpenProg
-              _ <- S.program mainMenuStartProg
-              pure ()
-            "/options" -> do
-              _ <- S.program optionsCloseProg
-              pure ()
-            "/game" -> do
-              _ <- S.program gameBackProg
-              pure ()
-            _ -> pure ()
-  in Scene.sceneRuntime w1 g1
+          traverse_ S.program scenePrograms
+  in Scene.mkScene w1 g1
+
+sceneRoutes :: RouteS.Routes C Envelope
+sceneRoutes =
+  RouteS.route @"/main-menu" (\_ () -> mkRuntime [mainMenuOpenProg, mainMenuStartProg]) (Just ())
+    RouteS.:> RouteS.route @"/options" (\_ () -> mkRuntime [optionsCloseProg]) (Just ())
+    RouteS.:> RouteS.route @"/game" (\_ () -> mkRuntime [gameBackProg]) (Just ())
+    RouteS.:> RouteS.EmptyRoutes
+
+sceneRouter :: RouteS.Router C Envelope
+sceneRouter =
+  case RouteS.createRouter sceneRoutes of
+    Left err ->
+      error ("invalid scene router: " <> err)
+    Right router ->
+      router
+
+sceneOrder :: [SceneId]
+sceneOrder = [sceneMainMenu, sceneOptions, sceneGame]
+
+sceneRuntimeMap :: Map SceneId (Scene.SceneRuntime C Envelope)
+sceneRuntimeMap =
+  Map.fromList
+    [ (sid, mkSceneAt sid)
+    | sid <- sceneOrder
+    ]
+  where
+    mkSceneAt sid =
+      case RouteS.enterPath sceneRouter sid of
+        Just rt -> rt
+        Nothing -> error ("missing scene route runtime for " <> sid)
 
 acceptsScene :: SceneId -> Envelope -> Bool
 acceptsScene sid env =
   case envTarget env of
     ToScene dst -> sid == dst
     ToRouter -> False
-    Broadcast -> True
 
 activeSceneIds :: Scene.History SceneId -> [SceneId]
-activeSceneIds h =
-  filter (/= sceneRoot) (Scene.locationSegments (Scene.current h))
+activeSceneIds h = Scene.locationSegments (Scene.current h)
 
-stepRuntime :: Double -> [Envelope] -> Scene.SceneRuntime C Envelope -> (Scene.SceneRuntime C Envelope, [Envelope])
-stepRuntime dt inbox rt0 =
-  Scene.runScene dt inbox rt0
+isActiveScene :: SceneId -> Scene.History SceneId -> Bool
+isActiveScene sid h = sid `elem` Scene.locationSegments (Scene.current h)
+
+gotoScenePath :: Scene.GotoMode -> SceneId -> Scene.History SceneId -> Scene.History SceneId
+gotoScenePath mode sid h =
+  RouteS.gotoPath mode sid sceneRouter h
 
 stepHost :: Double -> [Envelope] -> Host -> (Host, [Envelope])
 stepHost dt external host0 =
   let inbound = hostMailbox host0 <> external
-      sceneOrder = activeSceneIds (hostHistory host0)
+      activeOrder = activeSceneIds (hostHistory host0)
       (scenes1, outbox) =
-        foldl' (stepOne inbound) (hostScenes host0, []) sceneOrder
+        foldl' (stepOne inbound) (hostScenes host0, []) activeOrder
       history1 = applyRouterEvents (hostHistory host0) outbox
       mailbox1 = filter ((/= ToRouter) . envTarget) outbox
       host1 =
@@ -163,7 +192,7 @@ stepHost dt external host0 =
         Nothing -> (sceneMap, outAcc)
         Just rt0 ->
           let inbox = filter (acceptsScene sid) inbound
-              (rt1, out1) = stepRuntime dt inbox rt0
+              (rt1, out1) = Scene.runScene dt inbox rt0
           in (Map.insert sid rt1 sceneMap, outAcc <> out1)
 
 applyRouterEvents :: Scene.History SceneId -> [Envelope] -> Scene.History SceneId
@@ -176,31 +205,28 @@ applyRouterEvents h0 outbox =
     applyOne h cmd =
       case cmd of
         NavOpenOptions ->
-          case reverse (Scene.locationSegments (Scene.current h)) of
-            top : _ | top == sceneOptions -> h
-            _ -> Scene.goto Scene.Push sceneOptions h
+          if isActiveScene sceneOptions h
+            then h
+            else gotoScenePath Scene.Push sceneOptions h
         NavBack ->
           Scene.back h
         NavGotoGame ->
-          Scene.goto Scene.Push sceneGame h
+          gotoScenePath Scene.Push sceneGame h
         NavGotoMenu ->
-          Scene.goto Scene.Push sceneMainMenu h
+          gotoScenePath Scene.Push sceneMainMenu h
         _ ->
           h
 
 initialHost :: Host
 initialHost =
-  let runtimeMap =
-        Map.fromList
-          [ (sceneMainMenu, mkRuntime sceneMainMenu)
-          , (sceneOptions, mkRuntime sceneOptions)
-          , (sceneGame, mkRuntime sceneGame)
-          ]
-  in Host
+  Host
       { hostHistory = Scene.history [sceneMainMenu]
-      , hostScenes = runtimeMap
+      , hostScenes = sceneRuntimeMap
       , hostMailbox = []
       }
+
+fromHost :: SceneId -> Msg -> Envelope
+fromHost dst = Envelope hostSender (ToScene dst)
 
 sceneTickCount :: Host -> SceneId -> Int
 sceneTickCount host sid =
@@ -223,10 +249,10 @@ renderPath h = unlines (go segs)
 
 scriptedInputs :: [[Envelope]]
 scriptedInputs =
-  [ [Envelope sceneRoot (ToScene sceneMainMenu) UiOpenOptions]
-  , [Envelope sceneRoot (ToScene sceneOptions) UiCloseTop]
-  , [Envelope sceneRoot (ToScene sceneMainMenu) UiStartGame]
-  , [Envelope sceneRoot (ToScene sceneGame) UiBackToMenu]
+  [ [fromHost sceneMainMenu UiOpenOptions]
+  , [fromHost sceneOptions UiCloseTop]
+  , [fromHost sceneMainMenu UiStartGame]
+  , [fromHost sceneGame UiBackToMenu]
   , []
   ]
 
