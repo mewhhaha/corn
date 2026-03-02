@@ -24,6 +24,7 @@ library
                       Engine.Data.Program
                       Engine.Data.Scene
                       Engine.Data.Route
+                      Engine.Data.Router
                       Engine.Data.Route.Simple
                       Engine.Data.Input
                       Engine.Data.Transform

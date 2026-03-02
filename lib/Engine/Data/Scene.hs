@@ -1,3 +1,12 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeAbstractions #-}
+{-# LANGUAGE TypeOperators #-}
+
 module Engine.Data.Scene
   ( SceneStack
   , emptyStack
@@ -17,12 +26,14 @@ module Engine.Data.Scene
   , GotoMode(..)
   , History
   , history
+  , historyFrom
   , historyAt
   , current
   , canGoBack
   , canGoForward
   , gotoAt
   , goto
+  , gotoSegment
   , back
   , forward
   , SceneRuntime(..)
@@ -34,9 +45,11 @@ import Prelude
 
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Proxy (Proxy(..))
 import qualified Engine.Data.ECS as E
 import Engine.Data.FRP (DTime, Events)
 import qualified Engine.Data.Program as S
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 newtype SceneStack a = SceneStack
   { unSceneStack :: [a]
@@ -110,8 +123,21 @@ data History sid = History
   , hForwardStack :: ![Location sid]
   } deriving (Eq, Show)
 
-history :: [sid] -> History sid
-history = historyAt . path
+class KnownSegments (segments :: [Symbol]) where
+  knownSegments :: Proxy segments -> [String]
+
+instance KnownSegments '[] where
+  knownSegments _ = []
+
+instance (KnownSymbol seg, KnownSegments rest) => KnownSegments (seg ': rest) where
+  knownSegments _ =
+    symbolVal (Proxy @seg) : knownSegments (Proxy @rest)
+
+history :: forall segments. KnownSegments segments => History String
+history = historyAt (path (knownSegments (Proxy @segments)))
+
+historyFrom :: [sid] -> History sid
+historyFrom = historyAt . path
 
 historyAt :: Location sid -> History sid
 historyAt loc =
@@ -152,8 +178,13 @@ gotoLocation mode next h =
 gotoAt :: Eq sid => GotoMode -> Location sid -> History sid -> History sid
 gotoAt = gotoLocation
 
-goto :: Eq sid => GotoMode -> sid -> History sid -> History sid
-goto mode segment h =
+goto :: GotoMode -> forall segment. KnownSymbol segment => History String -> History String
+goto mode @segment h =
+  let segment = symbolVal (Proxy @segment)
+  in gotoLocation mode (path [segment]) h
+
+gotoSegment :: Eq sid => GotoMode -> sid -> History sid -> History sid
+gotoSegment mode segment h =
   gotoLocation mode (path [segment]) h
 
 back :: History sid -> History sid

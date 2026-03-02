@@ -13,7 +13,7 @@ import qualified Engine.Data.FRP as F
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.Program as S
 import qualified Engine.Data.Scene as Scene
-import qualified Engine.Data.Route as Route
+import qualified Engine.Data.Router as Route
 import qualified Engine.Data.Input as I
 import GHC.Generics (Generic)
 import qualified Engine.Data.Transform as T
@@ -51,8 +51,8 @@ Benchmarks focus on quick, game‑like scenarios so iteration stays fast.
 - `program/10k/eachm`: same workload as `game/flock-10k` with primary engine target name.
 - `program/10k+1/eachm`: same as `program/10k/eachm` but with 10k+1 entities.
 - `scene/history/nav-cycle`: path edits + `back`/`forward` history traversal.
-- `scene/router/goto-match`: typed route `gotoRoute` + `currentRoute` match/decode.
-- `scene/router/simple-enter`: static `Route.Simple` `gotoPath` + `enterPath`/`enterPathWithSearch`.
+- `scene/router/simple-enter`: legacy static router `gotoPath` + `sync`.
+- `scene/router/runtime-step`: runtime router loop (`create` + `step` + `navigate`).
 - `scene/path/goto-cycle`: single-segment path replacements with `goto`.
 
 Run:
@@ -823,10 +823,10 @@ type SceneId = String
 ### 1) Path/history operations
 
 ```haskell
-h0 = Scene.history ["/main-menu"]
-h1 = Scene.goto Scene.Push "/options" h0
+h0 = Scene.history @'["/main-menu"]
+h1 = Scene.goto Scene.Push @"/options" h0
 h2 = Scene.back h1
-h3 = Scene.goto Scene.Push "/game" h2
+h3 = Scene.goto Scene.Push @"/game" h2
 h4 = Scene.back h3
 h5 = Scene.forward h4
 
@@ -837,8 +837,12 @@ Scene.locationSegments (Scene.current h5)
 Use `Push` when you want history entries (`back`/`forward`),
 and `Replace` for in-place path edits.
 Use plain path segments for history; URL params and search params are modeled on routes.
+Use `Scene.historyFrom` and `Scene.gotoSegment` when your scene IDs are not `String`.
 
-### 2) Static router DSL (colocated route enter functions)
+### 2) Runtime router DSL (recommended)
+
+This is the primary API now: define typed routes once, create a runtime, step it,
+and navigate via `Route.navigate`.
 
 ```haskell
 {-# LANGUAGE DataKinds #-}
@@ -847,112 +851,126 @@ Use plain path segments for history; URL params and search params are modeled on
 {-# LANGUAGE TypeApplications #-}
 
 import GHC.Generics (Generic)
-import qualified Data.Map.Strict as Map
-import qualified Engine.Data.Route as Core
-import qualified Engine.Data.Route.Simple as Route
+import qualified Engine.Data.Router as Route
 import qualified Engine.Data.Scene as Scene
-
-type SceneId = String
 
 data PlayerSearch = PlayerSearch
   { tab :: [String]
-  } deriving (Eq, Show, Generic, Core.SearchCodec)
+  } deriving (Eq, Show, Generic, Route.SearchCodec)
 
-playerEntry ::
-  Route.Params "/main-menu/players/{:id}" ->
-  PlayerSearch ->
-  Scene.SceneRuntime C Msg
-playerEntry params (PlayerSearch tabs) =
-  let playerId = Route.param @"id" params
-  in mkPlayersScene playerId tabs
+data Msg
+  = UiOpenOptions
+  | UiStartGame
+  | UiBack
+  | Nav Route.Nav
+  | RenderLine String
+  deriving (Eq, Show)
 
-routes :: Route.Routes C Msg
+data SceneState = SceneState
+  { ssRuntime :: Scene.SceneRuntime C Msg
+  }
+
+mainMenuRoute :: Route.StepRoute "/main-menu" SceneState Msg ()
+mainMenuRoute =
+  Route.stepRoute
+    (\_ () -> SceneState mkMainMenuScene)
+    (\ctx dt inbox st0 ->
+      let (rt1, out1) = Scene.runScene dt inbox (ssRuntime st0)
+      in
+        ( st0 { ssRuntime = rt1 }
+        , RenderLine ("main-menu " <> show (Route.stepEvents ctx)) : out1
+        )
+    )
+    (Just ())
+
+optionsRoute :: Route.StepRoute "/main-menu/options" SceneState Msg ()
+optionsRoute =
+  Route.stepRoute
+    (\_ () -> SceneState mkOptionsScene)
+    (\ctx dt inbox st0 ->
+      let (rt1, out1) = Scene.runScene dt inbox (ssRuntime st0)
+      in
+        ( st0 { ssRuntime = rt1 }
+        , RenderLine ("options " <> show (Route.stepEvents ctx)) : out1
+        )
+    )
+    (Just ())
+
+gameRoute :: Route.StepRoute "/game/{:id}" SceneState Msg PlayerSearch
+gameRoute =
+  Route.stepRoute
+    (\params (PlayerSearch tabs) ->
+      let pid = Route.param @"id" params
+      in SceneState (mkGameScene pid tabs)
+    )
+    (\_ dt inbox st0 ->
+      let (rt1, out1) = Scene.runScene dt inbox (ssRuntime st0)
+      in (st0 { ssRuntime = rt1 }, out1)
+    )
+    (Just (PlayerSearch ["summary"]))
+
+routes :: Route.StepRoutes SceneState Msg '[ "/main-menu", "/main-menu/options", "/game/{:id}" ]
 routes =
-  Route.route @"/main-menu" (\_ () -> mkMainMenuScene) (Just ())
-    Route.:> Route.route @"/options" (\_ () -> mkOptionsScene) (Just ())
-    Route.:> Route.route @"/main-menu/players/{:id}" playerEntry (Just (PlayerSearch ["summary"]))
-    Route.:> Route.EmptyRoutes
+  mainMenuRoute
+    Route.:>>
+      optionsRoute
+    Route.:>>
+      gameRoute
+    Route.:>>
+      Route.EmptyStepRoutes
 
-router :: Route.Router C Msg
-router =
-  case Route.createRouter routes of
-    Right r -> r
+runtime0 :: Route.Runtime SceneState Msg '[ "/main-menu", "/main-menu/options", "/game/{:id}" ]
+runtime0 =
+  case Route.create routes "/main-menu" of
+    Right rt -> rt
     Left err -> error err
-
-h1 :: Scene.History SceneId
-h1 = Route.gotoPath Scene.Push "/options" router (Scene.history ["/main-menu"])
-
-defaultPlayersScene :: Maybe (Scene.SceneRuntime C Msg)
-defaultPlayersScene = Route.enterPath router "/main-menu/players/42"
-
-explicitPlayersScene :: Maybe (Scene.SceneRuntime C Msg)
-explicitPlayersScene =
-  Route.enterPathWithSearch
-    router
-    "/main-menu/players/42"
-    (Map.fromList [("tab", ["stats"])])
 ```
 
-Route behavior:
-- Path param keys come from the route pattern (`{:id}` or `:id`).
-- Search keys come from your search record field names (`SearchCodec`).
-- `enterPath` uses route defaults (`params = Just ...`) when present.
-- `enterPathWithSearch` enforces exact search-key matching.
-- `gotoPath` resolves by specificity: more literal segments win.
-  Example: `/a/b/c` beats `/a/b/{:id}` for `/a/b/c`, while `/a/b/e` matches `/a/b/{:id}`.
+Behavior:
+- Route params are validated before your route logic runs (`Route.param @"id"`).
+- Search params are decoded through `SearchCodec`, with optional defaults.
+- Route events (`Entered`, `Exited`, `BecameTop`, `LeftTop`) are available in `stepEvents`.
+- Path matching is specificity-based (`/a/b/c` wins over `/a/b/{:id}` on `/a/b/c`).
 
-Scene function with already-validated params:
+### 3) Router loop (create/step/navigate)
 
 ```haskell
-playerEntry ::
-  Route.Params "/main-menu/players/{:id}" ->
-  PlayerSearch ->
-  Scene.SceneRuntime C Msg
-playerEntry params search =
-  let playerId = Route.param @"id" params
-  in mkPlayersScene playerId (tab search)
+import Data.List (foldl')
+import qualified Engine.Data.Router as Route
+import qualified Engine.Data.Scene as Scene
+
+stepRouter ::
+  Double ->
+  [Msg] ->
+  Route.Runtime SceneState Msg paths ->
+  (Route.Runtime SceneState Msg paths, [Msg])
+stepRouter dt external rt0 =
+  let (rt1, out0) = Route.step dt external rt0
+      rt2 =
+        foldl'
+          (\rt msg ->
+            case msg of
+              Nav navCmd -> Route.navigate navCmd rt
+              _ -> rt
+          )
+          rt1
+          out0
+  in (rt2, out0)
+
+runLoop :: Route.Runtime SceneState Msg paths -> IO ()
+runLoop rt0 = do
+  external <- pollInputs
+  let (rt1, outbox) = stepRouter 0.016 external rt0
+      pathNow = Scene.locationSegments (Route.current rt1)
+  render pathNow outbox
+  if shouldExit outbox then pure () else runLoop rt1
 ```
 
-Use `Engine.Data.Route` directly when you need advanced tree construction (`RouteTree`,
-`compileTree`) or low-level typed matching helpers (`Meta`, `gotoRoute`, `currentRoute`).
-
-### 3) Scene runtime is just world + graph (runnable unit)
-
-```haskell
-import qualified Engine.Data.ECS as E
-import qualified Engine.Data.Program as S
-
-type C = ...
-type Msg = ...
-
-scene0 :: Scene.SceneRuntime C Msg
-scene0 = Scene.mkScene world0 graph0
-
-(scene1, outbox) = Scene.runScene 0.016 inbox scene0
-```
-
-Router-driven host pattern:
-
-```haskell
-data Msg = UiOpenOptions | NavOpenOptions deriving (Eq, Show)
-data Target = ToRouter | ToScene SceneId deriving (Eq, Show)
-data Envelope = Envelope SceneId Target Msg deriving (Eq, Show)
-
-mainMenuProg :: S.ProgramM c Envelope ()
-mainMenuProg = do
-  _ <- S.await (\(Envelope _ _ m) -> m == UiOpenOptions)
-  S.send [Envelope "/main-menu" ToRouter NavOpenOptions]
-```
-
-`examples/src/Examples/ScenesNavigation.hs` uses this pattern with static scene-route
-entries and avoids `case sid of ...` scene dispatch.
-
-Runnable prototype:
-
-```sh
-cd examples
-cabal run corn-examples -- scenes-navigation
-```
+Core flow:
+- `Route.create` builds one runtime from your static route tree.
+- `Route.step` runs active/exiting routes and returns one merged `outbox`.
+- `Route.navigate` updates history (`Route.Goto Scene.Push "/path"`, `Route.Back`, `Route.Forward`).
+- Render from `outbox` plus `Route.current` / `Route.canGoBack` / `Route.canGoForward`.
 
 ---
 

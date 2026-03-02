@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-deprecations #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -14,8 +15,7 @@ import GHC.Generics (Generic)
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.FRP as F
 import qualified Engine.Data.Program as S
-import qualified Engine.Data.Route as Route
-import qualified Engine.Data.Route.Simple as RouteS
+import qualified Engine.Data.Router as RouteS
 import qualified Engine.Data.Scene as Scene
 
 data Pos = Pos {-# UNPACK #-} !Double {-# UNPACK #-} !Double
@@ -53,11 +53,7 @@ type Graph msg = S.Graph C msg
 
 data BenchSearch = BenchSearch
   { tab :: [String]
-  } deriving (Eq, Show, Generic, Route.SearchCodec)
-
-data BenchUrl = BenchUrl
-  { itemId :: String
-  } deriving (Eq, Show, Generic, Route.UrlCodec)
+  } deriving (Eq, Show, Generic, RouteS.SearchCodec)
 
 data SceneNode
   = SceneRoot
@@ -395,14 +391,14 @@ runSwitchBurst n =
   in out
 
 runSceneHistoryNavCycle :: Int -> Int
-runSceneHistoryNavCycle iters = go iters (Scene.history [SceneRoot]) 0
+runSceneHistoryNavCycle iters = go iters (Scene.historyFrom [SceneRoot]) 0
   where
     go n h acc =
       if n <= 0
         then acc
         else
-          let h1 = Scene.goto Scene.Push SceneMenu h
-              h2 = Scene.goto Scene.Push SceneOptions h1
+          let h1 = Scene.gotoSegment Scene.Push SceneMenu h
+              h2 = Scene.gotoSegment Scene.Push SceneOptions h1
               h3 = Scene.back h2
               h4 = Scene.back h3
               h5 = Scene.forward h4
@@ -413,52 +409,17 @@ runSceneHistoryNavCycle iters = go iters (Scene.history [SceneRoot]) 0
           in go (n - 1) h5 (acc + score)
 
 runScenePathGotoCycle :: Int -> Int
-runScenePathGotoCycle iters = go iters (Scene.history ["/root"]) 0
+runScenePathGotoCycle iters = go iters (Scene.history @'["/root"]) 0
   where
     go n h acc =
       if n <= 0
         then acc
         else
-          let h1 = Scene.goto Scene.Replace "/menu" h
-              h2 = Scene.goto Scene.Replace "/options" h1
-              h3 = Scene.goto Scene.Replace "/menu" h2
+          let h1 = Scene.goto Scene.Replace @"/menu" h
+              h2 = Scene.goto Scene.Replace @"/options" h1
+              h3 = Scene.goto Scene.Replace @"/menu" h2
               segScore = length (Scene.locationSegments (Scene.current h3))
           in go (n - 1) h3 (acc + segScore)
-
-runSceneRouterGotoMatch :: Int -> Int
-runSceneRouterGotoMatch iters =
-  case (layoutRouteResult, itemsRouteResult) of
-    (Right layoutRoute, Right itemsRoute) ->
-      let router =
-            itemsRoute Route.:> layoutRoute Route.:> Route.RNil
-      in go iters router itemsRoute (Scene.history ["/root"]) 0
-    _ -> 0
-  where
-    layoutRouteResult :: Either String (Route.Meta String () Route.UrlParams)
-    layoutRouteResult = Route.route "/layout"
-
-    itemsRouteResult :: Either String (Route.Meta String BenchSearch BenchUrl)
-    itemsRouteResult = Route.route "/layout/items/{:itemId}"
-
-    go n router itemsRoute h acc =
-      if n <= 0
-        then acc
-        else
-          let h1 =
-                Route.gotoRoute
-                  Scene.Push
-                  itemsRoute
-                  (BenchSearch ["stats"])
-                  (BenchUrl "42")
-                  router
-                  h
-              matched =
-                case Route.currentRoute itemsRoute router h1 of
-                  Just (BenchSearch tabs, BenchUrl ident)
-                    | tabs == ["stats"] && ident == "42" -> 1
-                  _ -> 0
-              h2 = Scene.goto Scene.Replace "/layout" h1
-          in go (n - 1) router itemsRoute h2 (acc + matched)
 
 emptyBenchScene :: Scene.SceneRuntime C UiMsg
 emptyBenchScene =
@@ -466,7 +427,7 @@ emptyBenchScene =
     (E.emptyWorld :: E.World C)
     (S.graph (pure ()))
 
-simpleBenchRoutes :: RouteS.Routes C UiMsg
+simpleBenchRoutes :: RouteS.Routes C UiMsg '[ "/layout", "/layout/items/{:id}" ]
 simpleBenchRoutes =
   RouteS.route @"/layout" (\_ () -> emptyBenchScene) (Just ())
     RouteS.:> RouteS.route
@@ -483,32 +444,81 @@ runSceneSimpleRouterEnter iters =
   case RouteS.createRouter simpleBenchRoutes of
     Left _ -> 0
     Right router ->
-      go iters router (Scene.history ["/layout"]) 0
+      let h0 = Scene.history @'["/layout"]
+      in go iters router h0 0
   where
     go n router h acc =
       if n <= 0
         then acc
         else
-          let h1 = RouteS.gotoPath Scene.Push "/layout/items/42" router h
+          let (h1, scenes1) = RouteS.gotoPath Scene.Push "/layout/items/42" router h
               enteredDefault =
-                case RouteS.enterPath router "/layout/items/42" of
+                case Map.lookup "/layout/items" scenes1 of
                   Just _ -> 1
                   Nothing -> 0
+              locOverride =
+                (Scene.current h1)
+                  { Scene.locationSearchParams = Map.fromList [("tab", ["stats"])]
+                  }
+              scenesOverride =
+                RouteS.sync router (Scene.historyAt locOverride)
               enteredOverride =
-                case
-                  RouteS.enterPathWithSearch
-                    router
-                    "/layout/items/42"
-                    (Map.fromList [("tab", ["stats"])])
-                of
+                case Map.lookup "/layout/items" scenesOverride of
                   Just _ -> 1
                   Nothing -> 0
-              h2 = Scene.back h1
+              (h2, _) = RouteS.back router h1
               score =
                 length (Scene.locationSegments (Scene.current h2))
                   + enteredDefault
                   + enteredOverride
           in go (n - 1) router h2 (acc + score)
+
+runtimeBenchRoutes :: RouteS.StepRoutes Int UiMsg '[ "/layout", "/layout/items/{:id}" ]
+runtimeBenchRoutes =
+  RouteS.stepRoute @"/layout"
+    (\_ () -> 0)
+    (\_ _ _ n ->
+      let n1 = n + 1
+      in (n1, [Focus (odd n1)])
+    )
+    (Just ())
+    RouteS.:>>
+      RouteS.stepRoute
+        @"/layout/items/{:id}"
+        (\params (BenchSearch tabs) ->
+          let item = RouteS.param @"id" params
+          in item `seq` length tabs
+        )
+        (\_ _ _ n ->
+          let n1 = n + 1
+          in (n1, [Hover n1])
+        )
+        (Just (BenchSearch ["stats"]))
+      RouteS.:>>
+      RouteS.EmptyStepRoutes
+
+runSceneRouterRuntimeStep :: Int -> Int
+runSceneRouterRuntimeStep iters =
+  case RouteS.create runtimeBenchRoutes "/layout" of
+    Left _ -> 0
+    Right rt0 -> go iters rt0 0
+  where
+    go n rt acc =
+      if n <= 0
+        then acc
+        else
+          let (rt1, out1) = RouteS.step 0.016 [] rt
+              rt2 = RouteS.navigate (RouteS.Goto Scene.Push "/layout/items/42") rt1
+              (rt3, out2) = RouteS.step 0.016 [] rt2
+              rt4 = RouteS.navigate RouteS.Back rt3
+              (rt5, out3) = RouteS.step 0.016 [] rt4
+              score =
+                length (Scene.locationSegments (RouteS.current rt5))
+                  + length out1
+                  + length out2
+                  + length out3
+                  + if RouteS.canGoForward rt5 then 1 else 0
+          in go (n - 1) rt5 (acc + score)
 
 main :: IO ()
 main = defaultMain
@@ -553,10 +563,10 @@ main = defaultMain
   , bgroup "scene"
       [ bench "history/nav-cycle" $
           nf runSceneHistoryNavCycle (5000 :: Int)
-      , bench "router/goto-match" $
-          nf runSceneRouterGotoMatch (5000 :: Int)
       , bench "router/simple-enter" $
           nf runSceneSimpleRouterEnter (5000 :: Int)
+      , bench "router/runtime-step" $
+          nf runSceneRouterRuntimeStep (5000 :: Int)
       , bench "path/goto-cycle" $
           nf runScenePathGotoCycle (5000 :: Int)
       ]

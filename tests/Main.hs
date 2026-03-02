@@ -110,16 +110,12 @@ main = do
   assert "scene history back/forward" scene_history_back_forward
   assert "scene history clears forward on new nav" scene_history_back_clears_forward_on_new_nav
   assert "scene historyAt params" scene_history_pathwith_params
-  assert "scene typed router route" scene_typed_router_route
-  assert "scene typed router rejects extra url keys" scene_typed_router_rejects_extra_url_keys
-  assert "scene route includes layout prefix when route exists" scene_route_path_prefix_includes_layout_when_present
-  assert "scene route skips missing layout prefix" scene_route_path_prefix_skips_missing_layout
-  assert "scene route rejects extra url keys" scene_route_path_rejects_extra_url_keys
-  assert "scene route auto codec roundtrip" scene_route_auto_codec_roundtrip
-  assert "scene handler gets validated route params" scene_route_scene_handler_receives_validated_params
-  assert "scene route specificity prefers literal over param" scene_route_specificity_prefers_literal
-  assert "scene route tree compiles and goto uses compiled router" scene_route_tree_compile_and_goto
   assert "scene simple route dsl compiles and validates params" scene_route_simple_dsl
+  assert "scene route specificity prefers literal over param" scene_route_specificity_prefers_literal
+  assert "scene simple route has typed goto over registered paths" scene_route_simple_typed_goto
+  assert "scene simple route back/forward wraps history plus sync" scene_route_simple_back_forward
+  assert "scene simple route rejects invalid search keys" scene_route_simple_search_keys_strict
+  assert "scene runtime route events + navigation step loop" scene_route_runtime_step_events
 
   results <-
     sequence

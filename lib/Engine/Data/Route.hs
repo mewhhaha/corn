@@ -738,3 +738,34 @@ onRoute ::
   Maybe a
 onRoute routeDef router sceneFn h =
   onRouteAt routeDef router sceneFn (Scene.current h)
+
+{-# DEPRECATED Meta "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED Route "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED AnyRoute "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED RouteTree "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED SomeRouter "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED CompiledTree "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED routeBranch "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED routeLeaf "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED routeBranchAt "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED routeLeafAt "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED sceneBranchAt "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED sceneLeafAt "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED compileTree "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED resolveCompiledPath "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED gotoCompiledPath "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED Router "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED emptyRouter "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED addRoute "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED UrlCodec "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED UrlFieldCodec "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED SearchFieldCodec "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED route "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED routeWith "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED resolvePath "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED gotoPath "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED gotoRoute "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED matchRoute "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED currentRoute "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED onRouteAt "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}
+{-# DEPRECATED onRoute "Engine.Data.Route is legacy. Use Engine.Data.Router for new routing code." #-}

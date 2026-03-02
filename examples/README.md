@@ -24,8 +24,8 @@ cabal run corn-examples -- scenes-navigation
 - `platformer`: single-actor gravity + periodic jump impulse loop.
 - `horde-survival`: moving player target with mob chase/attrition.
 - `bullet-hell`: periodic radial bullet burst spawning + TTL cleanup.
-- `scenes-navigation`: single-stack scene routing with history-style goto/back/forward, using
-  a statically built `Route.Simple` router instead of `SceneId` branching.
+- `scenes-navigation`: single-stack scene routing with history-style push/replace/back/forward,
+  with navigation messages and route-driven scene activation.
 
 ## Modeling Notes
 
