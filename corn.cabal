@@ -19,7 +19,19 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  Engine.Data.FRP
+    exposed-modules:  Engine.Corn
+                      Engine.Corn.Prelude
+                      Engine.Corn.Plugin
+                      Engine.Corn.Advanced
+                      Engine.Corn.Advanced.ECS
+                      Engine.Corn.Advanced.FRP
+                      Engine.Corn.Advanced.Input
+                      Engine.Corn.Advanced.Program
+                      Engine.Corn.Advanced.Route
+                      Engine.Corn.Advanced.Router
+                      Engine.Corn.Advanced.Scene
+                      Engine.Corn.Advanced.Transform
+                      Engine.Data.FRP
                       Engine.Data.ECS
                       Engine.Data.Program
                       Engine.Data.Scene

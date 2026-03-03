@@ -11,6 +11,7 @@ import Data.Bits (bit, (.|.))
 import Data.List (foldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Foldable as Foldable
+import qualified Engine.Corn as Corn
 import GHC.Generics (Generic)
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.FRP as F
@@ -520,6 +521,89 @@ runSceneRouterRuntimeStep iters =
                   + if RouteS.canGoForward rt5 then 1 else 0
           in go (n - 1) rt5 (acc + score)
 
+data CornBenchRoute
+  = CornBenchMenu
+  | CornBenchOptions
+  | CornBenchGame
+  deriving (Eq, Show)
+
+instance Corn.RouteCodec CornBenchRoute where
+  encodeRoute routeId =
+    case routeId of
+      CornBenchMenu -> "/main-menu"
+      CornBenchOptions -> "/main-menu/options"
+      CornBenchGame -> "/game"
+  decodeRoute routeText =
+    case routeText of
+      "/main-menu" -> Just CornBenchMenu
+      "/main-menu/options" -> Just CornBenchOptions
+      "/game" -> Just CornBenchGame
+      _ -> Nothing
+
+data CornBenchMsg
+  = CornOpen
+  | CornClose
+  | CornStart
+  | CornBack
+  deriving (Eq, Show)
+
+data CornBenchModel = CornBenchModel
+  { cornBenchMenuTicks :: !Int
+  , cornBenchOptionsTicks :: !Int
+  , cornBenchGameTicks :: !Int
+  } deriving (Eq, Show)
+
+cornBenchScene :: CornBenchRoute -> Corn.Scene CornBenchModel CornBenchRoute CornBenchMsg
+cornBenchScene routeId =
+  case routeId of
+    CornBenchMenu ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {cornBenchMenuTicks = cornBenchMenuTicks model0 + 1}
+            cmds =
+              [Corn.Navigate (Corn.Push CornBenchOptions) | CornOpen `elem` inbox]
+                <> [Corn.Navigate (Corn.Push CornBenchGame) | CornStart `elem` inbox]
+        in (model1, cmds)
+    CornBenchOptions ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {cornBenchOptionsTicks = cornBenchOptionsTicks model0 + 1}
+            cmds = [Corn.Navigate Corn.Back | CornClose `elem` inbox]
+        in (model1, cmds)
+    CornBenchGame ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {cornBenchGameTicks = cornBenchGameTicks model0 + 1}
+            cmds = [Corn.Navigate Corn.Back | CornBack `elem` inbox]
+        in (model1, cmds)
+
+runSceneCornSimpleStep :: Int -> Int
+runSceneCornSimpleStep iters =
+  go
+    iters
+    ( Corn.start $
+        Corn.game
+          CornBenchMenu
+          (CornBenchModel 0 0 0)
+          cornBenchScene
+    )
+    0
+  where
+    go n rt acc =
+      if n <= 0
+        then acc
+        else
+          let (rt1, _) = Corn.step 0.016 [CornOpen] rt
+              (rt2, _) = Corn.step 0.016 [CornClose] rt1
+              (rt3, _) = Corn.step 0.016 [CornStart] rt2
+              (rt4, _) = Corn.step 0.016 [CornBack] rt3
+              m = Corn.model rt4
+              score =
+                length (Corn.currentPath rt4)
+                  + if Corn.canGoBack rt4 then 1 else 0
+                  + if Corn.canGoForward rt4 then 1 else 0
+                  + cornBenchMenuTicks m
+                  + cornBenchOptionsTicks m
+                  + cornBenchGameTicks m
+          in go (n - 1) rt4 (acc + score)
+
 main :: IO ()
 main = defaultMain
   [ bgroup "game"
@@ -563,6 +647,8 @@ main = defaultMain
   , bgroup "scene"
       [ bench "history/nav-cycle" $
           nf runSceneHistoryNavCycle (5000 :: Int)
+      , bench "corn/simple-step" $
+          nf runSceneCornSimpleStep (5000 :: Int)
       , bench "router/simple-enter" $
           nf runSceneSimpleRouterEnter (5000 :: Int)
       , bench "router/runtime-step" $

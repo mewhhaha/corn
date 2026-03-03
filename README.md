@@ -9,14 +9,28 @@ See `skills/corn-engine-docs/references/invariants.md` for runtime/domain invari
 Suggested imports (to avoid name clashes with Prelude):
 
 ```haskell
+import qualified Engine.Corn as Corn
 import qualified Engine.Data.FRP as F
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.Program as S
-import qualified Engine.Data.Scene as Scene
-import qualified Engine.Data.Router as Route
 import qualified Engine.Data.Input as I
 import GHC.Generics (Generic)
 import qualified Engine.Data.Transform as T
+```
+
+Single-import option for the high-level surface:
+
+```haskell
+import Engine.Corn.Prelude
+```
+
+Advanced/internal APIs are available via:
+
+```haskell
+import qualified Engine.Corn.Advanced.Router as RouterA
+import qualified Engine.Corn.Advanced.Scene as SceneA
+import qualified Engine.Corn.Advanced.ECS as E
+import qualified Engine.Corn.Advanced.Program as S
 ```
 
 Note: Some examples use `do` with Applicative only; enable `ApplicativeDo`.
@@ -51,9 +65,15 @@ Benchmarks focus on quick, game‑like scenarios so iteration stays fast.
 - `program/10k/eachm`: same workload as `game/flock-10k` with primary engine target name.
 - `program/10k+1/eachm`: same as `program/10k/eachm` but with 10k+1 entities.
 - `scene/history/nav-cycle`: path edits + `back`/`forward` history traversal.
+- `scene/corn/simple-step`: high-level `Engine.Corn` loop (`game` + `start` + `step`).
 - `scene/router/simple-enter`: legacy static router `gotoPath` + `sync`.
 - `scene/router/runtime-step`: runtime router loop (`create` + `step` + `navigate`).
 - `scene/path/goto-cycle`: single-segment path replacements with `goto`.
+
+Benchmark timing is reported per benchmark workload invocation, not per individual
+engine call. For example, `scene/corn/simple-step` currently runs `5000`
+iterations and each iteration executes `4` `Corn.step` calls (`20000` total
+steps). A result around `6 ms` there is roughly `0.3 us` per `Corn.step`.
 
 Run:
 
@@ -809,168 +829,127 @@ resetScore :: E.Entity -> Patch
 resetScore e = S.at e (S.update (const (Score 0))) -- or S.at e (S.set (Score 0))
 ```
 
-## Scene Routing (Single Stack)
+## Game Flow (Recommended API)
 
-Corn now recommends one navigation stack as the primary model:
-`[SceneId]` plus browser-like history (`current`, `canGoBack`, `canGoForward`).
+`Engine.Corn` is now the default surface: one obvious way to build and step games.
 
 ```haskell
-import qualified Engine.Data.Scene as Scene
-
-type SceneId = String
+import qualified Engine.Corn as Corn
 ```
 
-### 1) Path/history operations
+### 1) Define routes as normal Haskell data
 
 ```haskell
-h0 = Scene.history @'["/main-menu"]
-h1 = Scene.goto Scene.Push @"/options" h0
-h2 = Scene.back h1
-h3 = Scene.goto Scene.Push @"/game" h2
-h4 = Scene.back h3
-h5 = Scene.forward h4
-
-Scene.locationSegments (Scene.current h5)
--- ["/game"]
-```
-
-Use `Push` when you want history entries (`back`/`forward`),
-and `Replace` for in-place path edits.
-Use plain path segments for history; URL params and search params are modeled on routes.
-Use `Scene.historyFrom` and `Scene.gotoSegment` when your scene IDs are not `String`.
-
-### 2) Runtime router DSL (recommended)
-
-This is the primary API now: define typed routes once, create a runtime, step it,
-and navigate via `Route.navigate`.
-
-```haskell
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE TypeApplications #-}
-
-import GHC.Generics (Generic)
-import qualified Engine.Data.Router as Route
-import qualified Engine.Data.Scene as Scene
-
-data PlayerSearch = PlayerSearch
-  { tab :: [String]
-  } deriving (Eq, Show, Generic, Route.SearchCodec)
-
-data Msg
-  = UiOpenOptions
-  | UiStartGame
-  | UiBack
-  | Nav Route.Nav
-  | RenderLine String
+data Route
+  = MainMenu
+  | Options
+  | Game
   deriving (Eq, Show)
 
-data SceneState = SceneState
-  { ssRuntime :: Scene.SceneRuntime C Msg
-  }
+routeTable :: Corn.RouteTable Route
+routeTable =
+  Corn.routeTable
+    [ (MainMenu, "/main-menu")
+    , (Options, "/main-menu/options")
+    , (Game, "/game")
+    ]
 
-mainMenuRoute :: Route.StepRoute "/main-menu" SceneState Msg ()
-mainMenuRoute =
-  Route.stepRoute
-    (\_ () -> SceneState mkMainMenuScene)
-    (\ctx dt inbox st0 ->
-      let (rt1, out1) = Scene.runScene dt inbox (ssRuntime st0)
-      in
-        ( st0 { ssRuntime = rt1 }
-        , RenderLine ("main-menu " <> show (Route.stepEvents ctx)) : out1
-        )
-    )
-    (Just ())
-
-optionsRoute :: Route.StepRoute "/main-menu/options" SceneState Msg ()
-optionsRoute =
-  Route.stepRoute
-    (\_ () -> SceneState mkOptionsScene)
-    (\ctx dt inbox st0 ->
-      let (rt1, out1) = Scene.runScene dt inbox (ssRuntime st0)
-      in
-        ( st0 { ssRuntime = rt1 }
-        , RenderLine ("options " <> show (Route.stepEvents ctx)) : out1
-        )
-    )
-    (Just ())
-
-gameRoute :: Route.StepRoute "/game/{:id}" SceneState Msg PlayerSearch
-gameRoute =
-  Route.stepRoute
-    (\params (PlayerSearch tabs) ->
-      let pid = Route.param @"id" params
-      in SceneState (mkGameScene pid tabs)
-    )
-    (\_ dt inbox st0 ->
-      let (rt1, out1) = Scene.runScene dt inbox (ssRuntime st0)
-      in (st0 { ssRuntime = rt1 }, out1)
-    )
-    (Just (PlayerSearch ["summary"]))
-
-routes :: Route.StepRoutes SceneState Msg '[ "/main-menu", "/main-menu/options", "/game/{:id}" ]
-routes =
-  mainMenuRoute
-    Route.:>>
-      optionsRoute
-    Route.:>>
-      gameRoute
-    Route.:>>
-      Route.EmptyStepRoutes
-
-runtime0 :: Route.Runtime SceneState Msg '[ "/main-menu", "/main-menu/options", "/game/{:id}" ]
-runtime0 =
-  case Route.create routes "/main-menu" of
-    Right rt -> rt
-    Left err -> error err
+instance Corn.RouteCodec Route where
+  encodeRoute = Corn.encodeBy routeTable
+  decodeRoute = Corn.decodeBy routeTable
 ```
 
-Behavior:
-- Route params are validated before your route logic runs (`Route.param @"id"`).
-- Search params are decoded through `SearchCodec`, with optional defaults.
-- Route events (`Entered`, `Exited`, `BecameTop`, `LeftTop`) are available in `stepEvents`.
-- Path matching is specificity-based (`/a/b/c` wins over `/a/b/{:id}` on `/a/b/c`).
-
-### 3) Router loop (create/step/navigate)
+### 2) Define scenes as pure step functions
 
 ```haskell
-import Data.List (foldl')
-import qualified Engine.Data.Router as Route
-import qualified Engine.Data.Scene as Scene
+data Msg = UiOpenOptions | UiCloseTop | UiStartGame | UiBackToMenu
+  deriving (Eq, Show)
 
-stepRouter ::
-  Double ->
-  [Msg] ->
-  Route.Runtime SceneState Msg paths ->
-  (Route.Runtime SceneState Msg paths, [Msg])
-stepRouter dt external rt0 =
-  let (rt1, out0) = Route.step dt external rt0
-      rt2 =
-        foldl'
-          (\rt msg ->
-            case msg of
-              Nav navCmd -> Route.navigate navCmd rt
-              _ -> rt
-          )
-          rt1
-          out0
-  in (rt2, out0)
+data Model = Model
+  { menuTicks :: !Int
+  , optionsTicks :: !Int
+  , gameTicks :: !Int
+  }
 
-runLoop :: Route.Runtime SceneState Msg paths -> IO ()
-runLoop rt0 = do
-  external <- pollInputs
-  let (rt1, outbox) = stepRouter 0.016 external rt0
-      pathNow = Scene.locationSegments (Route.current rt1)
-  render pathNow outbox
-  if shouldExit outbox then pure () else runLoop rt1
+menuScene :: Corn.Scene Model Route Msg
+menuScene =
+  Corn.scene $ \_frame inbox model0 ->
+    let model1 = model0 {menuTicks = menuTicks model0 + 1}
+        cmds =
+          [Corn.Navigate (Corn.Push Options) | UiOpenOptions `elem` inbox]
+            <> [Corn.Navigate (Corn.Push Game) | UiStartGame `elem` inbox]
+    in (model1, cmds)
+
+optionsScene :: Corn.Scene Model Route Msg
+optionsScene =
+  Corn.scene $ \_ inbox model0 ->
+    let model1 = model0 {optionsTicks = optionsTicks model0 + 1}
+        cmds = [Corn.Navigate Corn.Back | UiCloseTop `elem` inbox]
+    in (model1, cmds)
+
+gameScene :: Corn.Scene Model Route Msg
+gameScene =
+  Corn.scene $ \_ inbox model0 ->
+    let model1 = model0 {gameTicks = gameTicks model0 + 1}
+        cmds = [Corn.Navigate Corn.Back | UiBackToMenu `elem` inbox]
+    in (model1, cmds)
+
+sceneFor :: Route -> Corn.Scene Model Route Msg
+sceneFor routeId =
+  case routeId of
+    MainMenu -> menuScene
+    Options -> optionsScene
+    Game -> gameScene
 ```
 
-Core flow:
-- `Route.create` builds one runtime from your static route tree.
-- `Route.step` runs active/exiting routes and returns one merged `outbox`.
-- `Route.navigate` updates history (`Route.Goto Scene.Push "/path"`, `Route.Back`, `Route.Forward`).
-- Render from `outbox` plus `Route.current` / `Route.canGoBack` / `Route.canGoForward`.
+### 3) Build + step runtime
+
+```haskell
+gameDef :: Corn.Game Route Model Msg
+gameDef = Corn.game MainMenu (Model 0 0 0) sceneFor
+
+runtime0 :: Corn.Runtime Route Model Msg
+runtime0 = Corn.start gameDef
+
+(runtime1, outbox1) = Corn.step 0.016 [UiOpenOptions] runtime0
+(runtime2, outbox2) = Corn.step 0.016 [UiCloseTop] runtime1
+
+activePath = map Corn.encodeRoute (Corn.currentPath runtime2)
+canBack = Corn.canGoBack runtime2
+canFwd = Corn.canGoForward runtime2
+modelNow = Corn.model runtime2
+```
+
+### 4) Add cross-cutting plugins (optional)
+
+```haskell
+data Msg
+  = UiOpenOptions
+  | UiCloseTop
+  | UiStartGame
+  | UiBackToMenu
+  | SceneSeen Route
+
+analyticsPlugin :: Corn.Plugin Model Route Msg
+analyticsPlugin =
+  Corn.plugin $ \frame _ model0 ->
+    (model0, [Corn.Emit (SceneSeen (frameRoute frame))])
+
+gameWithPlugins :: Corn.Game Route Model Msg
+gameWithPlugins =
+  Corn.withPlugin analyticsPlugin gameDef
+```
+
+The same plugin helpers are also re-exported from `Engine.Corn.Plugin`.
+
+Core rules:
+- Scenes are pure.
+- Navigation is emitted as commands (`Corn.Navigate (Corn.Push route)`, `Corn.Navigate (Corn.Replace route)`, `Corn.Navigate Corn.Back`, `Corn.Navigate Corn.Forward`).
+- Runtime owns one history stack and applies nav commands deterministically after scene steps (deferred: changes apply to the next `Corn.step` snapshot).
+- `Corn.step` returns domain outbox (`Emit` messages), with nav handled internally.
+- `Corn.Quit` is terminal for the current command stream; subsequent commands in the same frame are ignored.
+
+For low-level control, import `Engine.Corn.Advanced.*` submodules directly.
 
 ---
 

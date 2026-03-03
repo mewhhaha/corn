@@ -18,12 +18,20 @@ module SceneProps
   , scene_route_simple_typed_goto
   , scene_route_simple_back_forward
   , scene_route_simple_search_keys_strict
+  , scene_route_simple_rejects_duplicate_leaves
   , scene_route_runtime_step_events
+  , scene_route_runtime_rejects_duplicate_patterns
+  , scene_route_runtime_rejects_duplicate_leaves
+  , scene_corn_simple_navigation_loop
+  , scene_corn_deferred_navigation_snapshot
+  , scene_corn_quit_is_terminal
+  , scene_corn_plugin_step_runs
   ) where
 
 import Prelude
 
 import qualified Data.Map.Strict as Map
+import qualified Engine.Corn as Corn
 import qualified Engine.Data.ECS as E
 import qualified Engine.Data.Program as S
 import qualified Engine.Data.Router as Route
@@ -251,6 +259,18 @@ scene_route_simple_search_keys_strict =
           Nothing -> True
           Just _ -> False
 
+duplicateSimpleRoutes :: Route.Routes SimpleC () '[ "/players/{:id}", "/players/{:slug}" ]
+duplicateSimpleRoutes =
+  Route.route @"/players/{:id}" (\_ () -> mkSimpleScene "id") (Just ())
+    Route.:> Route.route @"/players/{:slug}" (\_ () -> mkSimpleScene "slug") (Just ())
+    Route.:> Route.EmptyRoutes
+
+scene_route_simple_rejects_duplicate_leaves :: Bool
+scene_route_simple_rejects_duplicate_leaves =
+  case Route.createRouter duplicateSimpleRoutes of
+    Left _ -> True
+    Right _ -> False
+
 hasScene :: String -> Scene.History String -> Route.SceneMap c msg -> Bool
 hasScene sid h scenes =
   case activeSceneAt sid h scenes of
@@ -301,3 +321,243 @@ scene_route_runtime_step_events =
           && Scene.locationSegments (Route.current rt5) == ["/main-menu"]
           && not (Route.canGoBack rt5)
           && Route.canGoForward rt5
+
+duplicatePatternRoutes :: Route.StepRoutes Int () '[ "/dup", "/dup" ]
+duplicatePatternRoutes =
+  Route.stepRoute @"/dup" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
+    Route.:>>
+      Route.stepRoute @"/dup" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
+      Route.:>>
+      Route.EmptyStepRoutes
+
+scene_route_runtime_rejects_duplicate_patterns :: Bool
+scene_route_runtime_rejects_duplicate_patterns =
+  case Route.create duplicatePatternRoutes "/dup" of
+    Left _ -> True
+    Right _ -> False
+
+duplicateLeafRoutes :: Route.StepRoutes Int () '[ "/players/{:id}", "/players/{:slug}" ]
+duplicateLeafRoutes =
+  Route.stepRoute @"/players/{:id}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
+    Route.:>>
+      Route.stepRoute @"/players/{:slug}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
+      Route.:>>
+      Route.EmptyStepRoutes
+
+scene_route_runtime_rejects_duplicate_leaves :: Bool
+scene_route_runtime_rejects_duplicate_leaves =
+  case Route.create duplicateLeafRoutes "/players/1" of
+    Left _ -> True
+    Right _ -> False
+
+data CornRoute
+  = CornMenu
+  | CornOptions
+  | CornGame
+  deriving (Eq, Show)
+
+cornRouteTable :: Corn.RouteTable CornRoute
+cornRouteTable =
+  Corn.routeTable
+    [ (CornMenu, "/main-menu")
+    , (CornOptions, "/main-menu/options")
+    , (CornGame, "/game")
+    ]
+
+instance Corn.RouteCodec CornRoute where
+  encodeRoute = Corn.encodeBy cornRouteTable
+  decodeRoute = Corn.decodeBy cornRouteTable
+
+data CornMsg
+  = CornOpen
+  | CornClose
+  | CornStart
+  | CornBack
+  deriving (Eq, Show)
+
+data CornModel = CornModel
+  { cornMenuTicks :: !Int
+  , cornOptionsTicks :: !Int
+  , cornGameTicks :: !Int
+  } deriving (Eq, Show)
+
+cornSceneFor :: CornRoute -> Corn.Scene CornModel CornRoute CornMsg
+cornSceneFor routeId =
+  case routeId of
+    CornMenu ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {cornMenuTicks = cornMenuTicks model0 + 1}
+            cmds =
+              [Corn.Navigate (Corn.Push CornOptions) | CornOpen `elem` inbox]
+                <> [Corn.Navigate (Corn.Push CornGame) | CornStart `elem` inbox]
+        in (model1, cmds)
+    CornOptions ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {cornOptionsTicks = cornOptionsTicks model0 + 1}
+            cmds = [Corn.Navigate Corn.Back | CornClose `elem` inbox]
+        in (model1, cmds)
+    CornGame ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {cornGameTicks = cornGameTicks model0 + 1}
+            cmds = [Corn.Navigate Corn.Back | CornBack `elem` inbox]
+        in (model1, cmds)
+
+scene_corn_simple_navigation_loop :: Bool
+scene_corn_simple_navigation_loop =
+  let gameDef =
+        Corn.game
+          CornMenu
+          (CornModel 0 0 0)
+          cornSceneFor
+      rt0 = Corn.start gameDef
+      (rt1, out1) = Corn.step 0.016 [CornOpen] rt0
+      (rt2, out2) = Corn.step 0.016 [CornClose] rt1
+      (rt3, out3) = Corn.step 0.016 [CornStart] rt2
+      (rt4, out4) = Corn.step 0.016 [CornBack] rt3
+      model4 = Corn.model rt4
+  in out1 == []
+      && out2 == []
+      && out3 == []
+      && out4 == []
+      && map Corn.encodeRoute (Corn.currentPath rt1) == ["/main-menu", "/main-menu/options"]
+      && map Corn.encodeRoute (Corn.currentPath rt2) == ["/main-menu"]
+      && map Corn.encodeRoute (Corn.currentPath rt3) == ["/main-menu", "/game"]
+      && map Corn.encodeRoute (Corn.currentPath rt4) == ["/main-menu"]
+      && cornMenuTicks model4 >= 4
+      && cornOptionsTicks model4 >= 1
+      && cornGameTicks model4 >= 1
+
+data CornDeferRoute
+  = DeferMenu
+  | DeferOptions
+  deriving (Eq, Show)
+
+data CornDeferMsg = DeferOpen
+  deriving (Eq, Show)
+
+data CornDeferModel = CornDeferModel
+  { deferMenuTicks :: !Int
+  , deferOptionsTicks :: !Int
+  } deriving (Eq, Show)
+
+deferSceneFor :: CornDeferRoute -> Corn.Scene CornDeferModel CornDeferRoute CornDeferMsg
+deferSceneFor routeId =
+  case routeId of
+    DeferMenu ->
+      Corn.scene $ \_ inbox model0 ->
+        let model1 = model0 {deferMenuTicks = deferMenuTicks model0 + 1}
+            cmds = [Corn.Navigate (Corn.Push DeferOptions) | DeferOpen `elem` inbox]
+        in (model1, cmds)
+    DeferOptions ->
+      Corn.scene $ \_ _ model0 ->
+        let model1 = model0 {deferOptionsTicks = deferOptionsTicks model0 + 1}
+        in (model1, [])
+
+scene_corn_deferred_navigation_snapshot :: Bool
+scene_corn_deferred_navigation_snapshot =
+  let gameDef =
+        Corn.game
+          DeferMenu
+          (CornDeferModel 0 0)
+          deferSceneFor
+      rt0 = Corn.start gameDef
+      (rt1, out1) = Corn.step 0.016 [DeferOpen] rt0
+      (rt2, out2) = Corn.step 0.016 [] rt1
+      m1 = Corn.model rt1
+      m2 = Corn.model rt2
+  in out1 == []
+      && out2 == []
+      && Corn.currentPath rt1 == [DeferMenu, DeferOptions]
+      && deferMenuTicks m1 == 1
+      && deferOptionsTicks m1 == 0
+      && deferMenuTicks m2 == 2
+      && deferOptionsTicks m2 == 1
+
+data CornQuitRoute
+  = QuitMenu
+  | QuitOther
+  deriving (Eq, Show)
+
+data CornQuitMsg = QuitOut
+  deriving (Eq, Show)
+
+data CornQuitModel = CornQuitModel
+  { quitMenuTicks :: !Int
+  , quitOtherTicks :: !Int
+  } deriving (Eq, Show)
+
+quitSceneFor :: CornQuitRoute -> Corn.Scene CornQuitModel CornQuitRoute CornQuitMsg
+quitSceneFor routeId =
+  case routeId of
+    QuitMenu ->
+      Corn.scene $ \_ _ model0 ->
+        let model1 = model0 {quitMenuTicks = quitMenuTicks model0 + 1}
+            cmds =
+              [ Corn.Quit
+              , Corn.Navigate (Corn.Push QuitOther)
+              , Corn.Emit QuitOut
+              ]
+        in (model1, cmds)
+    QuitOther ->
+      Corn.scene $ \_ _ model0 ->
+        let model1 = model0 {quitOtherTicks = quitOtherTicks model0 + 1}
+        in (model1, [])
+
+scene_corn_quit_is_terminal :: Bool
+scene_corn_quit_is_terminal =
+  let gameDef =
+        Corn.game
+          QuitMenu
+          (CornQuitModel 0 0)
+          quitSceneFor
+      rt0 = Corn.start gameDef
+      (rt1, out1) = Corn.step 0.016 [] rt0
+      (rt2, out2) = Corn.step 0.016 [] rt1
+      m1 = Corn.model rt1
+      m2 = Corn.model rt2
+  in out1 == []
+      && out2 == []
+      && not (Corn.isRunning rt1)
+      && not (Corn.isRunning rt2)
+      && Corn.currentPath rt1 == [QuitMenu]
+      && Corn.currentPath rt2 == [QuitMenu]
+      && quitMenuTicks m1 == 1
+      && quitOtherTicks m1 == 0
+      && m2 == m1
+
+data CornPluginRoute = PluginMenu
+  deriving (Eq, Show)
+
+data CornPluginModel = CornPluginModel
+  { pluginSceneTicks :: !Int
+  , pluginStepTicks :: !Int
+  } deriving (Eq, Show)
+
+pluginScene :: Corn.Scene CornPluginModel CornPluginRoute ()
+pluginScene =
+  Corn.scene $ \_ _ model0 ->
+    let model1 = model0 {pluginSceneTicks = pluginSceneTicks model0 + 1}
+    in (model1, [])
+
+pluginCounter :: Corn.Plugin CornPluginModel CornPluginRoute ()
+pluginCounter =
+  Corn.plugin $ \_ _ model0 ->
+    let model1 = model0 {pluginStepTicks = pluginStepTicks model0 + 1}
+    in (model1, [])
+
+scene_corn_plugin_step_runs :: Bool
+scene_corn_plugin_step_runs =
+  let gameDef =
+        Corn.withPlugin pluginCounter $
+          Corn.game
+            PluginMenu
+            (CornPluginModel 0 0)
+            (\PluginMenu -> pluginScene)
+      rt0 = Corn.start gameDef
+      (rt1, out1) = Corn.step 0.016 [] rt0
+      (rt2, out2) = Corn.step 0.016 [] rt1
+      m2 = Corn.model rt2
+  in out1 == []
+      && out2 == []
+      && pluginSceneTicks m2 == 2
+      && pluginStepTicks m2 == 2

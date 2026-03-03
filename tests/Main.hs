@@ -115,7 +115,14 @@ main = do
   assert "scene simple route has typed goto over registered paths" scene_route_simple_typed_goto
   assert "scene simple route back/forward wraps history plus sync" scene_route_simple_back_forward
   assert "scene simple route rejects invalid search keys" scene_route_simple_search_keys_strict
+  assert "scene simple route rejects duplicate leaves" scene_route_simple_rejects_duplicate_leaves
   assert "scene runtime route events + navigation step loop" scene_route_runtime_step_events
+  assert "scene runtime rejects duplicate route patterns" scene_route_runtime_rejects_duplicate_patterns
+  assert "scene runtime rejects duplicate route leaves" scene_route_runtime_rejects_duplicate_leaves
+  assert "corn simple facade loop navigation" scene_corn_simple_navigation_loop
+  assert "corn deferred navigation applies next frame" scene_corn_deferred_navigation_snapshot
+  assert "corn quit command is terminal in-frame" scene_corn_quit_is_terminal
+  assert "corn plugin step runs each frame" scene_corn_plugin_step_runs
 
   results <-
     sequence

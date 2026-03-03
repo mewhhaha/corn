@@ -206,6 +206,7 @@ stepEntryTree (StepEntry routeMeta _ _ _) =
 createStepRouter :: StepRoutes st msg paths -> Either String (StepRouter st msg paths)
 createStepRouter routes = do
   entries <- collectStepEntries routes
+  validateUniqueStepEntries entries
   let compiled = Core.compileTree (map stepEntryTree entries)
   pure
     StepRouter
@@ -531,6 +532,7 @@ entryTree (Entry routeMeta enterFn _) =
 createRouter :: Routes c msg paths -> Either String (Router c msg paths)
 createRouter routes = do
   entries <- collectEntries routes
+  validateUniqueEntries entries
   let compiled = Core.compileTree (map entryTree entries)
   pure
     Router
@@ -699,6 +701,36 @@ resolvedRouteSegments entries routeMeta =
     if null matched
       then maybeToList (Core.routeLeafSegment routeMeta)
       else matched
+
+duplicates :: Ord a => [a] -> [a]
+duplicates xs =
+  [key | (key, count) <- Map.toList (Map.fromListWith (+) [(x, 1 :: Int) | x <- xs]), count > 1]
+
+validateUniqueStepEntries :: [StepEntry st msg] -> Either String ()
+validateUniqueStepEntries entries = do
+  let patterns = [Core.routePattern routeMeta | StepEntry routeMeta _ _ _ <- entries]
+      duplicatePatterns = duplicates patterns
+      leaves = mapMaybe (\(StepEntry routeMeta _ _ _) -> Core.routeLeafSegment routeMeta) entries
+      duplicateLeaves = duplicates leaves
+  if null duplicatePatterns
+    then Right ()
+    else Left ("router create: duplicate route patterns " <> show duplicatePatterns)
+  if null duplicateLeaves
+    then Right ()
+    else Left ("router create: duplicate route leaves " <> show duplicateLeaves)
+
+validateUniqueEntries :: [Entry c msg] -> Either String ()
+validateUniqueEntries entries = do
+  let patterns = [Core.routePattern routeMeta | Entry routeMeta _ _ <- entries]
+      duplicatePatterns = duplicates patterns
+      leaves = mapMaybe (\(Entry routeMeta _ _) -> Core.routeLeafSegment routeMeta) entries
+      duplicateLeaves = duplicates leaves
+  if null duplicatePatterns
+    then Right ()
+    else Left ("router create: duplicate route patterns " <> show duplicatePatterns)
+  if null duplicateLeaves
+    then Right ()
+    else Left ("router create: duplicate route leaves " <> show duplicateLeaves)
 
 {-# DEPRECATED SceneMap "Legacy sync API. Prefer Route.Runtime + Route.create/Route.step/Route.navigate." #-}
 {-# DEPRECATED active "Legacy sync API. Prefer Route.step output and Route.current." #-}
