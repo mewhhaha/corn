@@ -26,6 +26,7 @@ module SceneProps
   , scene_corn_deferred_navigation_snapshot
   , scene_corn_quit_is_terminal
   , scene_corn_plugin_step_runs
+  , scene_corn_layer_from_inbox_helper
   ) where
 
 import Prelude
@@ -561,3 +562,42 @@ scene_corn_plugin_step_runs =
       && out2 == []
       && pluginSceneTicks m2 == 2
       && pluginStepTicks m2 == 2
+
+data CornHelperRoute
+  = HelperMenu
+  | HelperGame
+  deriving (Eq, Show)
+
+data CornHelperMsg
+  = HelperStart
+  | HelperBack
+  | HelperIgnore
+  deriving (Eq, Show)
+
+helperCommand :: CornHelperRoute -> CornHelperMsg -> Maybe (Corn.Cmd CornHelperRoute CornHelperMsg)
+helperCommand routeId msg =
+  case routeId of
+    HelperMenu ->
+      case msg of
+        HelperStart -> Just (Corn.Navigate (Corn.Push HelperGame))
+        HelperBack -> Nothing
+        HelperIgnore -> Nothing
+    HelperGame ->
+      case msg of
+        HelperBack -> Just (Corn.Navigate Corn.Back)
+        HelperStart -> Nothing
+        HelperIgnore -> Nothing
+
+helperLayerFor :: CornHelperRoute -> Corn.Layer () CornHelperRoute CornHelperMsg
+helperLayerFor = Corn.layerFromInboxAt helperCommand
+
+scene_corn_layer_from_inbox_helper :: Bool
+scene_corn_layer_from_inbox_helper =
+  let gameDef = Corn.game HelperMenu () helperLayerFor
+      rt0 = Corn.start gameDef
+      (rt1, out1) = Corn.step 0.016 [HelperStart] rt0
+      (rt2, out2) = Corn.step 0.016 [HelperBack] rt1
+  in out1 == []
+      && out2 == []
+      && Corn.currentPath rt1 == [HelperMenu, HelperGame]
+      && Corn.currentPath rt2 == [HelperMenu]

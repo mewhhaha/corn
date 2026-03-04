@@ -902,6 +902,30 @@ layerFor routeId =
     Game -> gameScene
 ```
 
+### 2a) Command-only layers (less plumbing)
+
+```haskell
+routeCommand :: Route -> Msg -> Maybe (Corn.Cmd Route Msg)
+routeCommand routeId msg =
+  case routeId of
+    MainMenu ->
+      case msg of
+        UiOpenOptions -> Just (Corn.Navigate (Corn.Push Options))
+        UiStartGame -> Just (Corn.Navigate (Corn.Push Game))
+        _ -> Nothing
+    Game ->
+      case msg of
+        UiBackToMenu -> Just (Corn.Navigate Corn.Back)
+        _ -> Nothing
+    Options ->
+      case msg of
+        UiCloseTop -> Just (Corn.Navigate Corn.Back)
+        _ -> Nothing
+
+commandLayerFor :: Route -> Corn.Layer () Route Msg
+commandLayerFor = Corn.layerFromInboxAt routeCommand
+```
+
 ### 3) Build + step runtime
 
 ```haskell

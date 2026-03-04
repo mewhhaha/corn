@@ -123,6 +123,7 @@ main = do
   assert "corn deferred navigation applies next frame" scene_corn_deferred_navigation_snapshot
   assert "corn quit command is terminal in-frame" scene_corn_quit_is_terminal
   assert "corn plugin step runs each frame" scene_corn_plugin_step_runs
+  assert "corn layerFromInboxAt helper reduces plumbing" scene_corn_layer_from_inbox_helper
 
   results <-
     sequence

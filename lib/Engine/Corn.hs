@@ -13,6 +13,8 @@ module Engine.Corn
   , Layer
   , layer
   , layerWith
+  , layerFromInbox
+  , layerFromInboxAt
   , LayerHooks(..)
   , noLayerHooks
   , Plugin
@@ -38,6 +40,7 @@ module Engine.Corn
 
 import Prelude
 
+import Data.Maybe (mapMaybe)
 import Engine.Data.FRP (DTime)
 import qualified Engine.Data.Scene as Scene
 
@@ -125,6 +128,20 @@ layerWith hooks stepFn =
     , layerStep = stepFn
     , layerExit = onExit hooks
     }
+
+layerFromInbox ::
+  (msg -> Maybe (Cmd route msg)) ->
+  Layer model route msg
+layerFromInbox toCmd =
+  layer $ \_ inbox model0 ->
+    (model0, mapMaybe toCmd inbox)
+
+layerFromInboxAt ::
+  (route -> msg -> Maybe (Cmd route msg)) ->
+  route ->
+  Layer model route msg
+layerFromInboxAt toCmd routeId =
+  layerFromInbox (toCmd routeId)
 
 data Plugin model route msg = Plugin
   { pluginEnter :: route -> model -> (model, [Cmd route msg])
