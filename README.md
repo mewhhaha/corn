@@ -859,7 +859,7 @@ instance Corn.RouteCodec Route where
   decodeRoute = Corn.decodeBy routeTable
 ```
 
-### 2) Define scenes as pure step functions
+### 2) Define layers as pure step functions
 
 ```haskell
 data Msg = UiOpenOptions | UiCloseTop | UiStartGame | UiBackToMenu
@@ -871,31 +871,31 @@ data Model = Model
   , gameTicks :: !Int
   }
 
-menuScene :: Corn.Scene Model Route Msg
+menuScene :: Corn.Layer Model Route Msg
 menuScene =
-  Corn.scene $ \_frame inbox model0 ->
+  Corn.layer $ \_frame inbox model0 ->
     let model1 = model0 {menuTicks = menuTicks model0 + 1}
         cmds =
           [Corn.Navigate (Corn.Push Options) | UiOpenOptions `elem` inbox]
             <> [Corn.Navigate (Corn.Push Game) | UiStartGame `elem` inbox]
     in (model1, cmds)
 
-optionsScene :: Corn.Scene Model Route Msg
+optionsScene :: Corn.Layer Model Route Msg
 optionsScene =
-  Corn.scene $ \_ inbox model0 ->
+  Corn.layer $ \_ inbox model0 ->
     let model1 = model0 {optionsTicks = optionsTicks model0 + 1}
         cmds = [Corn.Navigate Corn.Back | UiCloseTop `elem` inbox]
     in (model1, cmds)
 
-gameScene :: Corn.Scene Model Route Msg
+gameScene :: Corn.Layer Model Route Msg
 gameScene =
-  Corn.scene $ \_ inbox model0 ->
+  Corn.layer $ \_ inbox model0 ->
     let model1 = model0 {gameTicks = gameTicks model0 + 1}
         cmds = [Corn.Navigate Corn.Back | UiBackToMenu `elem` inbox]
     in (model1, cmds)
 
-sceneFor :: Route -> Corn.Scene Model Route Msg
-sceneFor routeId =
+layerFor :: Route -> Corn.Layer Model Route Msg
+layerFor routeId =
   case routeId of
     MainMenu -> menuScene
     Options -> optionsScene
@@ -906,7 +906,7 @@ sceneFor routeId =
 
 ```haskell
 gameDef :: Corn.Game Route Model Msg
-gameDef = Corn.game MainMenu (Model 0 0 0) sceneFor
+gameDef = Corn.game MainMenu (Model 0 0 0) layerFor
 
 runtime0 :: Corn.Runtime Route Model Msg
 runtime0 = Corn.start gameDef
@@ -943,9 +943,10 @@ gameWithPlugins =
 The same plugin helpers are also re-exported from `Engine.Corn.Plugin`.
 
 Core rules:
-- Scenes are pure.
+- Layers are pure.
 - Navigation is emitted as commands (`Corn.Navigate (Corn.Push route)`, `Corn.Navigate (Corn.Replace route)`, `Corn.Navigate Corn.Back`, `Corn.Navigate Corn.Forward`).
-- Runtime owns one history stack and applies nav commands deterministically after scene steps (deferred: changes apply to the next `Corn.step` snapshot).
+- Runtime owns one history stack and applies nav commands deterministically after layer steps (deferred: changes apply to the next `Corn.step` snapshot).
+- `Corn.currentPath` is the active layer stack (layouts + leaf). Each tick steps every layer in the path; modals/overlays are just layers pushed on top.
 - `Corn.step` returns domain outbox (`Emit` messages), with nav handled internally.
 - `Corn.Quit` is terminal for the current command stream; subsequent commands in the same frame are ignored.
 

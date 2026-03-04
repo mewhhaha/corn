@@ -553,23 +553,23 @@ data CornBenchModel = CornBenchModel
   , cornBenchGameTicks :: !Int
   } deriving (Eq, Show)
 
-cornBenchScene :: CornBenchRoute -> Corn.Scene CornBenchModel CornBenchRoute CornBenchMsg
+cornBenchScene :: CornBenchRoute -> Corn.Layer CornBenchModel CornBenchRoute CornBenchMsg
 cornBenchScene routeId =
   case routeId of
     CornBenchMenu ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {cornBenchMenuTicks = cornBenchMenuTicks model0 + 1}
             cmds =
               [Corn.Navigate (Corn.Push CornBenchOptions) | CornOpen `elem` inbox]
                 <> [Corn.Navigate (Corn.Push CornBenchGame) | CornStart `elem` inbox]
         in (model1, cmds)
     CornBenchOptions ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {cornBenchOptionsTicks = cornBenchOptionsTicks model0 + 1}
             cmds = [Corn.Navigate Corn.Back | CornClose `elem` inbox]
         in (model1, cmds)
     CornBenchGame ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {cornBenchGameTicks = cornBenchGameTicks model0 + 1}
             cmds = [Corn.Navigate Corn.Back | CornBack `elem` inbox]
         in (model1, cmds)

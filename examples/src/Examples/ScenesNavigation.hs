@@ -47,9 +47,9 @@ initialModel =
     , gameTicks = 0
     }
 
-menuScene :: Corn.Scene Model Route Msg
+menuScene :: Corn.Layer Model Route Msg
 menuScene =
-  Corn.scene $ \_ inbox model0 ->
+  Corn.layer $ \_ inbox model0 ->
     let model1 = model0 {menuTicks = menuTicks model0 + 1}
         cmds =
           [Corn.Navigate (Corn.Push Options) | UiOpenOptions `elem` inbox]
@@ -57,31 +57,31 @@ menuScene =
             <> [Corn.Navigate Corn.Forward | UiForward `elem` inbox]
     in (model1, cmds)
 
-optionsScene :: Corn.Scene Model Route Msg
+optionsScene :: Corn.Layer Model Route Msg
 optionsScene =
-  Corn.scene $ \_ inbox model0 ->
+  Corn.layer $ \_ inbox model0 ->
     let model1 = model0 {optionsTicks = optionsTicks model0 + 1}
         cmds =
           [Corn.Navigate Corn.Back | UiCloseTop `elem` inbox]
     in (model1, cmds)
 
-gameScene :: Corn.Scene Model Route Msg
+gameScene :: Corn.Layer Model Route Msg
 gameScene =
-  Corn.scene $ \_ inbox model0 ->
+  Corn.layer $ \_ inbox model0 ->
     let model1 = model0 {gameTicks = gameTicks model0 + 1}
         cmds =
           [Corn.Navigate Corn.Back | UiBackToMenu `elem` inbox]
     in (model1, cmds)
 
-sceneFor :: Route -> Corn.Scene Model Route Msg
-sceneFor routeId =
+layerFor :: Route -> Corn.Layer Model Route Msg
+layerFor routeId =
   case routeId of
     MainMenu -> menuScene
     Options -> optionsScene
     Game -> gameScene
 
 game :: Corn.Game Route Model Msg
-game = Corn.game MainMenu initialModel sceneFor
+game = Corn.game MainMenu initialModel layerFor
 
 frameDt :: Double
 frameDt = 0.016

@@ -10,11 +10,11 @@ module Engine.Corn
   , Cmd(..)
   , RouteEvent(..)
   , Frame(..)
-  , Scene
-  , scene
-  , sceneWith
-  , SceneHooks(..)
-  , noHooks
+  , Layer
+  , layer
+  , layerWith
+  , LayerHooks(..)
+  , noLayerHooks
   , Plugin
   , plugin
   , pluginWith
@@ -92,38 +92,38 @@ data Frame route = Frame
   , frameCanGoForward :: !Bool
   } deriving (Eq, Show)
 
-data Scene model route msg = Scene
-  { sceneEnter :: route -> model -> (model, [Cmd route msg])
-  , sceneStep :: Frame route -> [msg] -> model -> (model, [Cmd route msg])
-  , sceneExit :: route -> model -> (model, [Cmd route msg])
+data Layer model route msg = Layer
+  { layerEnter :: route -> model -> (model, [Cmd route msg])
+  , layerStep :: Frame route -> [msg] -> model -> (model, [Cmd route msg])
+  , layerExit :: route -> model -> (model, [Cmd route msg])
   }
 
-data SceneHooks model route msg = SceneHooks
+data LayerHooks model route msg = LayerHooks
   { onEnter :: route -> model -> (model, [Cmd route msg])
   , onExit :: route -> model -> (model, [Cmd route msg])
   }
 
-noHooks :: SceneHooks model route msg
-noHooks =
-  SceneHooks
+noLayerHooks :: LayerHooks model route msg
+noLayerHooks =
+  LayerHooks
     { onEnter = \_ mdl -> (mdl, [])
     , onExit = \_ mdl -> (mdl, [])
     }
 
-scene ::
+layer ::
   (Frame route -> [msg] -> model -> (model, [Cmd route msg])) ->
-  Scene model route msg
-scene = sceneWith noHooks
+  Layer model route msg
+layer = layerWith noLayerHooks
 
-sceneWith ::
-  SceneHooks model route msg ->
+layerWith ::
+  LayerHooks model route msg ->
   (Frame route -> [msg] -> model -> (model, [Cmd route msg])) ->
-  Scene model route msg
-sceneWith hooks stepFn =
-  Scene
-    { sceneEnter = onEnter hooks
-    , sceneStep = stepFn
-    , sceneExit = onExit hooks
+  Layer model route msg
+layerWith hooks stepFn =
+  Layer
+    { layerEnter = onEnter hooks
+    , layerStep = stepFn
+    , layerExit = onExit hooks
     }
 
 data Plugin model route msg = Plugin
@@ -163,29 +163,29 @@ pluginWith hooks stepFn =
 data Game route model msg = Game
   { gameInitialRoute :: !route
   , gameInitialModel :: !model
-  , gameSceneFor :: route -> Scene model route msg
+  , gameLayerFor :: route -> Layer model route msg
   , gamePlugins :: [Plugin model route msg]
   }
 
 game ::
   route ->
   model ->
-  (route -> Scene model route msg) ->
+  (route -> Layer model route msg) ->
   Game route model msg
-game initialRoute initialModel sceneFor =
-  gameWith [] initialRoute initialModel sceneFor
+game initialRoute initialModel layerFor =
+  gameWith [] initialRoute initialModel layerFor
 
 gameWith ::
   [Plugin model route msg] ->
   route ->
   model ->
-  (route -> Scene model route msg) ->
+  (route -> Layer model route msg) ->
   Game route model msg
-gameWith plugins initialRoute initialModel sceneFor =
+gameWith plugins initialRoute initialModel layerFor =
   Game
     { gameInitialRoute = initialRoute
     , gameInitialModel = initialModel
-    , gameSceneFor = sceneFor
+    , gameLayerFor = layerFor
     , gamePlugins = plugins
     }
 
@@ -262,13 +262,13 @@ step dt inbox runtime0 =
           entered = [routeId | routeId <- pathNow, routeId `notElem` rtPrevPath runtime0]
           exited = [routeId | routeId <- rtPrevPath runtime0, routeId `notElem` pathNow]
           exitedInOrder = reverse [routeId | routeId <- rtPrevPath runtime0, routeId `elem` exited]
-          sceneFor = gameSceneFor (rtGame runtime0)
+          layerFor = gameLayerFor (rtGame runtime0)
           plugins = gamePlugins (rtGame runtime0)
           (modelAfterExit, cmdExit) =
             foldl'
               (\(mdl, cmds) routeId ->
-                let sceneDef = sceneFor routeId
-                    (mdl1, cmds1) = sceneExit sceneDef routeId mdl
+                let layerDef = layerFor routeId
+                    (mdl1, cmds1) = layerExit layerDef routeId mdl
                     (mdl2, cmds2) = runPluginExit plugins routeId mdl1
                 in (mdl2, cmds <> cmds1 <> cmds2)
               )
@@ -279,8 +279,8 @@ step dt inbox runtime0 =
               (\(mdl, cmds) routeId ->
                 if routeId `elem` entered
                   then
-                    let sceneDef = sceneFor routeId
-                        (mdl1, cmds1) = sceneEnter sceneDef routeId mdl
+                    let layerDef = layerFor routeId
+                        (mdl1, cmds1) = layerEnter layerDef routeId mdl
                         (mdl2, cmds2) = runPluginEnter plugins routeId mdl1
                     in (mdl2, cmds <> cmds1 <> cmds2)
                   else (mdl, cmds)
@@ -299,8 +299,8 @@ step dt inbox runtime0 =
                         , frameCanGoBack = Scene.canGoBack (rtHistory runtime0)
                         , frameCanGoForward = Scene.canGoForward (rtHistory runtime0)
                         }
-                    sceneDef = sceneFor routeId
-                    (mdl1, cmds1) = sceneStep sceneDef frame inbox mdl
+                    layerDef = layerFor routeId
+                    (mdl1, cmds1) = layerStep layerDef frame inbox mdl
                     (mdl2, cmds2) = runPluginStep plugins frame inbox mdl1
                 in (mdl2, cmds <> cmds1 <> cmds2)
               )

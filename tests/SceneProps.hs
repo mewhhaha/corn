@@ -381,23 +381,23 @@ data CornModel = CornModel
   , cornGameTicks :: !Int
   } deriving (Eq, Show)
 
-cornSceneFor :: CornRoute -> Corn.Scene CornModel CornRoute CornMsg
+cornSceneFor :: CornRoute -> Corn.Layer CornModel CornRoute CornMsg
 cornSceneFor routeId =
   case routeId of
     CornMenu ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {cornMenuTicks = cornMenuTicks model0 + 1}
             cmds =
               [Corn.Navigate (Corn.Push CornOptions) | CornOpen `elem` inbox]
                 <> [Corn.Navigate (Corn.Push CornGame) | CornStart `elem` inbox]
         in (model1, cmds)
     CornOptions ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {cornOptionsTicks = cornOptionsTicks model0 + 1}
             cmds = [Corn.Navigate Corn.Back | CornClose `elem` inbox]
         in (model1, cmds)
     CornGame ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {cornGameTicks = cornGameTicks model0 + 1}
             cmds = [Corn.Navigate Corn.Back | CornBack `elem` inbox]
         in (model1, cmds)
@@ -440,16 +440,16 @@ data CornDeferModel = CornDeferModel
   , deferOptionsTicks :: !Int
   } deriving (Eq, Show)
 
-deferSceneFor :: CornDeferRoute -> Corn.Scene CornDeferModel CornDeferRoute CornDeferMsg
+deferSceneFor :: CornDeferRoute -> Corn.Layer CornDeferModel CornDeferRoute CornDeferMsg
 deferSceneFor routeId =
   case routeId of
     DeferMenu ->
-      Corn.scene $ \_ inbox model0 ->
+      Corn.layer $ \_ inbox model0 ->
         let model1 = model0 {deferMenuTicks = deferMenuTicks model0 + 1}
             cmds = [Corn.Navigate (Corn.Push DeferOptions) | DeferOpen `elem` inbox]
         in (model1, cmds)
     DeferOptions ->
-      Corn.scene $ \_ _ model0 ->
+      Corn.layer $ \_ _ model0 ->
         let model1 = model0 {deferOptionsTicks = deferOptionsTicks model0 + 1}
         in (model1, [])
 
@@ -486,11 +486,11 @@ data CornQuitModel = CornQuitModel
   , quitOtherTicks :: !Int
   } deriving (Eq, Show)
 
-quitSceneFor :: CornQuitRoute -> Corn.Scene CornQuitModel CornQuitRoute CornQuitMsg
+quitSceneFor :: CornQuitRoute -> Corn.Layer CornQuitModel CornQuitRoute CornQuitMsg
 quitSceneFor routeId =
   case routeId of
     QuitMenu ->
-      Corn.scene $ \_ _ model0 ->
+      Corn.layer $ \_ _ model0 ->
         let model1 = model0 {quitMenuTicks = quitMenuTicks model0 + 1}
             cmds =
               [ Corn.Quit
@@ -499,7 +499,7 @@ quitSceneFor routeId =
               ]
         in (model1, cmds)
     QuitOther ->
-      Corn.scene $ \_ _ model0 ->
+      Corn.layer $ \_ _ model0 ->
         let model1 = model0 {quitOtherTicks = quitOtherTicks model0 + 1}
         in (model1, [])
 
@@ -533,9 +533,9 @@ data CornPluginModel = CornPluginModel
   , pluginStepTicks :: !Int
   } deriving (Eq, Show)
 
-pluginScene :: Corn.Scene CornPluginModel CornPluginRoute ()
+pluginScene :: Corn.Layer CornPluginModel CornPluginRoute ()
 pluginScene =
-  Corn.scene $ \_ _ model0 ->
+  Corn.layer $ \_ _ model0 ->
     let model1 = model0 {pluginSceneTicks = pluginSceneTicks model0 + 1}
     in (model1, [])
 
