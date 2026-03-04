@@ -27,6 +27,7 @@ module SceneProps
   , scene_corn_quit_is_terminal
   , scene_corn_plugin_step_runs
   , scene_corn_layer_from_inbox_helper
+  , scene_corn_intent_game_centralizes_navigation
   ) where
 
 import Prelude
@@ -601,3 +602,63 @@ scene_corn_layer_from_inbox_helper =
       && out2 == []
       && Corn.currentPath rt1 == [HelperMenu, HelperGame]
       && Corn.currentPath rt2 == [HelperMenu]
+
+data CornIntentRoute
+  = IntentMenu
+  | IntentGame
+  deriving (Eq, Show)
+
+data CornIntentMsg
+  = IntentStart
+  | IntentBack
+  | IntentQuit
+  deriving (Eq, Show)
+
+data CornIntent
+  = GoIntentGame
+  | GoIntentBack
+  | QuitIntent
+  deriving (Eq, Show)
+
+intentFromInbox :: CornIntentRoute -> CornIntentMsg -> Maybe CornIntent
+intentFromInbox routeId msg =
+  case routeId of
+    IntentMenu ->
+      case msg of
+        IntentStart -> Just GoIntentGame
+        IntentQuit -> Just QuitIntent
+        IntentBack -> Nothing
+    IntentGame ->
+      case msg of
+        IntentBack -> Just GoIntentBack
+        IntentQuit -> Just QuitIntent
+        IntentStart -> Nothing
+
+intentLayerFor :: CornIntentRoute -> Corn.IntentLayer () CornIntentRoute CornIntentMsg CornIntent
+intentLayerFor routeId =
+  Corn.intentLayer $ \_ inbox model0 ->
+    ( model0
+    , [intent | msg <- inbox, Just intent <- [intentFromInbox routeId msg]]
+    )
+
+interpretIntent :: CornIntentRoute -> CornIntent -> Corn.CmdEffect CornIntentRoute CornIntentMsg
+interpretIntent routeId intent =
+  case (routeId, intent) of
+    (IntentMenu, GoIntentGame) -> Corn.One (Corn.Navigate (Corn.Push IntentGame))
+    (IntentGame, GoIntentBack) -> Corn.One (Corn.Navigate Corn.Back)
+    (_, QuitIntent) -> Corn.One Corn.Quit
+    _ -> Corn.Ignore
+
+scene_corn_intent_game_centralizes_navigation :: Bool
+scene_corn_intent_game_centralizes_navigation =
+  let gameDef = Corn.intentGame IntentMenu () intentLayerFor interpretIntent
+      rt0 = Corn.start gameDef
+      (rt1, out1) = Corn.step 0.016 [IntentStart] rt0
+      (rt2, out2) = Corn.step 0.016 [IntentBack] rt1
+      (rt3, out3) = Corn.step 0.016 [IntentQuit] rt2
+  in out1 == []
+      && out2 == []
+      && out3 == []
+      && Corn.currentPath rt1 == [IntentMenu, IntentGame]
+      && Corn.currentPath rt2 == [IntentMenu]
+      && not (Corn.isRunning rt3)

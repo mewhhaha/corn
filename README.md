@@ -902,7 +902,52 @@ layerFor routeId =
     Game -> gameScene
 ```
 
-### 2a) Command-only layers (less plumbing)
+### 2a) Intent + Interpreter (recommended)
+
+```haskell
+data Intent
+  = GoGame
+  | GoBack
+  | ExitApp
+
+intentFromInbox :: Route -> Msg -> Maybe Intent
+intentFromInbox routeId msg =
+  case routeId of
+    MainMenu ->
+      case msg of
+        UiStartGame -> Just GoGame
+        QuitDemo -> Just ExitApp
+        _ -> Nothing
+    Game ->
+      case msg of
+        UiBackToMenu -> Just GoBack
+        QuitDemo -> Just ExitApp
+        _ -> Nothing
+    Options ->
+      case msg of
+        UiCloseTop -> Just GoBack
+        _ -> Nothing
+
+intentLayerFor :: Route -> Corn.IntentLayer () Route Msg Intent
+intentLayerFor routeId =
+  Corn.intentLayer $ \_ inbox model0 ->
+    ( model0
+    , [intent | msg <- inbox, Just intent <- [intentFromInbox routeId msg]]
+    )
+
+interpretIntent :: Route -> Intent -> Corn.CmdEffect Route Msg
+interpretIntent routeId intent =
+  case (routeId, intent) of
+    (MainMenu, GoGame) -> Corn.One (Corn.Navigate (Corn.Push Game))
+    (_, GoBack) -> Corn.One (Corn.Navigate Corn.Back)
+    (_, ExitApp) -> Corn.One Corn.Quit
+    _ -> Corn.Ignore
+
+intentGameDef :: Corn.Game Route () Msg
+intentGameDef = Corn.intentGame MainMenu () intentLayerFor interpretIntent
+```
+
+### 2b) Legacy command-only layer helper (deprecated)
 
 ```haskell
 routeCommand :: Route -> Msg -> Maybe (Corn.Cmd Route Msg)

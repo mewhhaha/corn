@@ -17,6 +17,13 @@ module Engine.Corn
   , layerFromInboxAt
   , LayerHooks(..)
   , noLayerHooks
+  , CmdEffect(..)
+  , IntentLayer
+  , intentLayer
+  , intentLayerWith
+  , IntentLayerHooks(..)
+  , noIntentLayerHooks
+  , interpretIntentLayer
   , Plugin
   , plugin
   , pluginWith
@@ -25,6 +32,8 @@ module Engine.Corn
   , Game
   , game
   , gameWith
+  , intentGame
+  , intentGameWith
   , withPlugin
   , withPlugins
   , Runtime
@@ -143,6 +152,63 @@ layerFromInboxAt ::
 layerFromInboxAt toCmd routeId =
   layerFromInbox (toCmd routeId)
 
+data CmdEffect route msg
+  = Ignore
+  | One (Cmd route msg)
+  | Many [Cmd route msg]
+  deriving (Eq, Show)
+
+data IntentLayer model route msg intent = IntentLayer
+  { intentLayerEnter :: route -> model -> (model, [intent])
+  , intentLayerStep :: Frame route -> [msg] -> model -> (model, [intent])
+  , intentLayerExit :: route -> model -> (model, [intent])
+  }
+
+data IntentLayerHooks model route msg intent = IntentLayerHooks
+  { onIntentEnter :: route -> model -> (model, [intent])
+  , onIntentExit :: route -> model -> (model, [intent])
+  }
+
+noIntentLayerHooks :: IntentLayerHooks model route msg intent
+noIntentLayerHooks =
+  IntentLayerHooks
+    { onIntentEnter = \_ mdl -> (mdl, [])
+    , onIntentExit = \_ mdl -> (mdl, [])
+    }
+
+intentLayer ::
+  (Frame route -> [msg] -> model -> (model, [intent])) ->
+  IntentLayer model route msg intent
+intentLayer = intentLayerWith noIntentLayerHooks
+
+intentLayerWith ::
+  IntentLayerHooks model route msg intent ->
+  (Frame route -> [msg] -> model -> (model, [intent])) ->
+  IntentLayer model route msg intent
+intentLayerWith hooks stepFn =
+  IntentLayer
+    { intentLayerEnter = onIntentEnter hooks
+    , intentLayerStep = stepFn
+    , intentLayerExit = onIntentExit hooks
+    }
+
+interpretIntentLayer ::
+  (route -> intent -> CmdEffect route msg) ->
+  IntentLayer model route msg intent ->
+  Layer model route msg
+interpretIntentLayer interpret intentDef =
+  Layer
+    { layerEnter = \routeId model0 ->
+        let (model1, intents) = intentLayerEnter intentDef routeId model0
+        in (model1, concatMap (cmdEffectToList . interpret routeId) intents)
+    , layerStep = \frame inbox model0 ->
+        let (model1, intents) = intentLayerStep intentDef frame inbox model0
+        in (model1, concatMap (cmdEffectToList . interpret (frameRoute frame)) intents)
+    , layerExit = \routeId model0 ->
+        let (model1, intents) = intentLayerExit intentDef routeId model0
+        in (model1, concatMap (cmdEffectToList . interpret routeId) intents)
+    }
+
 data Plugin model route msg = Plugin
   { pluginEnter :: route -> model -> (model, [Cmd route msg])
   , pluginStep :: Frame route -> [msg] -> model -> (model, [Cmd route msg])
@@ -205,6 +271,25 @@ gameWith plugins initialRoute initialModel layerFor =
     , gameLayerFor = layerFor
     , gamePlugins = plugins
     }
+
+intentGame ::
+  route ->
+  model ->
+  (route -> IntentLayer model route msg intent) ->
+  (route -> intent -> CmdEffect route msg) ->
+  Game route model msg
+intentGame initialRoute initialModel intentLayerFor interpret =
+  intentGameWith [] initialRoute initialModel intentLayerFor interpret
+
+intentGameWith ::
+  [Plugin model route msg] ->
+  route ->
+  model ->
+  (route -> IntentLayer model route msg intent) ->
+  (route -> intent -> CmdEffect route msg) ->
+  Game route model msg
+intentGameWith plugins initialRoute initialModel intentLayerFor interpret =
+  gameWith plugins initialRoute initialModel (\routeId -> interpretIntentLayer interpret (intentLayerFor routeId))
 
 withPlugin ::
   Plugin model route msg ->
@@ -447,3 +532,13 @@ lastMaybe xs =
   case reverse xs of
     [] -> Nothing
     y : _ -> Just y
+
+cmdEffectToList :: CmdEffect route msg -> [Cmd route msg]
+cmdEffectToList effect =
+  case effect of
+    Ignore -> []
+    One cmd -> [cmd]
+    Many cmds -> cmds
+
+{-# DEPRECATED layerFromInbox "Prefer IntentLayer + intentGame and interpret intents via CmdEffect." #-}
+{-# DEPRECATED layerFromInboxAt "Prefer IntentLayer + intentGame and interpret intents via CmdEffect." #-}

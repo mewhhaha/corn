@@ -124,6 +124,7 @@ main = do
   assert "corn quit command is terminal in-frame" scene_corn_quit_is_terminal
   assert "corn plugin step runs each frame" scene_corn_plugin_step_runs
   assert "corn layerFromInboxAt helper reduces plumbing" scene_corn_layer_from_inbox_helper
+  assert "corn intentGame centralizes nav interpretation" scene_corn_intent_game_centralizes_navigation
 
   results <-
     sequence
