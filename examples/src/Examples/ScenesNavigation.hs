@@ -1,3 +1,9 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeApplications #-}
+
 module Examples.ScenesNavigation
   ( runConcept
   ) where
@@ -5,25 +11,9 @@ module Examples.ScenesNavigation
 import Prelude
 
 import Data.List (intercalate)
-import qualified Engine.Corn as Corn
-
-data Route
-  = MainMenu
-  | Options
-  | Game
-  deriving (Eq, Show)
-
-routeTableDef :: Corn.RouteTable Route
-routeTableDef =
-  Corn.routeTable
-    [ (MainMenu, "/main-menu")
-    , (Options, "/main-menu/options")
-    , (Game, "/game")
-    ]
-
-instance Corn.RouteCodec Route where
-  encodeRoute = Corn.encodeBy routeTableDef
-  decodeRoute = Corn.decodeBy routeTableDef
+import qualified Engine.Data.Router as Route
+import qualified Engine.Data.Scene as Scene
+import GHC.Generics (Generic)
 
 data Msg
   = UiOpenOptions
@@ -33,55 +23,61 @@ data Msg
   | UiForward
   deriving (Eq, Show)
 
-data Model = Model
-  { menuTicks :: !Int
-  , optionsTicks :: !Int
-  , gameTicks :: !Int
+newtype OptionsSearch = OptionsSearch
+  { tab :: [String]
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (Route.SearchCodec)
+
+data SceneOut = SceneOut
+  { outRoute :: !String
+  , outTick :: !Int
+  , outEvents :: ![Route.RouteEvent]
   } deriving (Eq, Show)
 
-initialModel :: Model
-initialModel =
-  Model
-    { menuTicks = 0
-    , optionsTicks = 0
-    , gameTicks = 0
-    }
+menuRoute :: Route.Route "/main-menu" Int Msg SceneOut ()
+menuRoute =
+  Route.route
+    (\_ () -> 0)
+    (\ctx _ inbox ticks0 ->
+      let ticks1 = ticks0 + 1
+          navs =
+            [Route.Push "/main-menu/options" | UiOpenOptions `elem` inbox]
+              <> [Route.Replace "/game" | UiStartGame `elem` inbox]
+              <> [Route.Forward | UiForward `elem` inbox]
+      in (ticks1, [SceneOut "/main-menu" ticks1 (Route.ctxEvents ctx)], navs)
+    )
+    (Just ())
 
-menuScene :: Corn.Layer Model Route Msg
-menuScene =
-  Corn.layer $ \_ inbox model0 ->
-    let model1 = model0 {menuTicks = menuTicks model0 + 1}
-        cmds =
-          [Corn.Navigate (Corn.Push Options) | UiOpenOptions `elem` inbox]
-            <> [Corn.Navigate (Corn.Push Game) | UiStartGame `elem` inbox]
-            <> [Corn.Navigate Corn.Forward | UiForward `elem` inbox]
-    in (model1, cmds)
+optionsRoute :: Route.Route "/main-menu/options" Int Msg SceneOut OptionsSearch
+optionsRoute =
+  Route.route
+    (\_ (OptionsSearch tabs) -> length tabs)
+    (\ctx _ inbox ticks0 ->
+      let ticks1 = ticks0 + 1
+          navs = [Route.Back | UiCloseTop `elem` inbox]
+      in (ticks1, [SceneOut "/main-menu/options" ticks1 (Route.ctxEvents ctx)], navs)
+    )
+    (Just (OptionsSearch ["audio"]))
 
-optionsScene :: Corn.Layer Model Route Msg
-optionsScene =
-  Corn.layer $ \_ inbox model0 ->
-    let model1 = model0 {optionsTicks = optionsTicks model0 + 1}
-        cmds =
-          [Corn.Navigate Corn.Back | UiCloseTop `elem` inbox]
-    in (model1, cmds)
+gameRoute :: Route.Route "/game" Int Msg SceneOut ()
+gameRoute =
+  Route.route
+    (\_ () -> 0)
+    (\ctx _ inbox ticks0 ->
+      let ticks1 = ticks0 + 1
+          navs = [Route.Replace "/main-menu" | UiBackToMenu `elem` inbox]
+      in (ticks1, [SceneOut "/game" ticks1 (Route.ctxEvents ctx)], navs)
+    )
+    (Just ())
 
-gameScene :: Corn.Layer Model Route Msg
-gameScene =
-  Corn.layer $ \_ inbox model0 ->
-    let model1 = model0 {gameTicks = gameTicks model0 + 1}
-        cmds =
-          [Corn.Navigate Corn.Back | UiBackToMenu `elem` inbox]
-    in (model1, cmds)
-
-layerFor :: Route -> Corn.Layer Model Route Msg
-layerFor routeId =
-  case routeId of
-    MainMenu -> menuScene
-    Options -> optionsScene
-    Game -> gameScene
-
-game :: Corn.Game Route Model Msg
-game = Corn.game MainMenu initialModel layerFor
+routes :: Route.Routes Int Msg SceneOut '[ "/main-menu", "/main-menu/options", "/game" ]
+routes =
+  Route.node menuRoute
+    ( Route.leaf optionsRoute
+        Route.:> Route.EmptyRoutes
+    )
+    Route.:> Route.leaf gameRoute
+    Route.:> Route.EmptyRoutes
 
 frameDt :: Double
 frameDt = 0.016
@@ -95,33 +91,33 @@ scriptedInputs =
   , [UiForward]
   ]
 
-renderPath :: Corn.Runtime Route Model Msg -> String
+renderPath :: Route.Runtime Int Msg SceneOut paths -> String
 renderPath runtime =
-  let segs = map Corn.encodeRoute (Corn.currentPath runtime)
+  let segs = Scene.locationSegments (Route.current runtime)
   in unlines
       [ "path=" <> show segs
       , "path-render=" <> intercalate " > " segs
-      , "canGoBack=" <> show (Corn.canGoBack runtime) <> ", canGoForward=" <> show (Corn.canGoForward runtime)
+      , "canGoBack=" <> show (Route.canGoBack runtime) <> ", canGoForward=" <> show (Route.canGoForward runtime)
       ]
 
-renderTicks :: Model -> String
-renderTicks model =
-  "ticks: menu=" <> show (menuTicks model)
-    <> ", options=" <> show (optionsTicks model)
-    <> ", game=" <> show (gameTicks model)
-
 runConcept :: IO ()
-runConcept = go 1 (Corn.start game) scriptedInputs
+runConcept =
+  case Route.create routes "/main-menu" of
+    Left err ->
+      putStrLn ("router create failed: " <> err)
+    Right rt0 ->
+      go 1 rt0 scriptedInputs
   where
-    go :: Int -> Corn.Runtime Route Model Msg -> [[Msg]] -> IO ()
+    go :: Int -> Route.Runtime Int Msg SceneOut '[ "/main-menu", "/main-menu/options", "/game" ] -> [[Msg]] -> IO ()
     go _ _ [] = pure ()
     go frameIx runtime0 (inputs : rest) = do
-      let (runtime1, outbox) = Corn.step frameDt inputs runtime0
-          activeNow = map Corn.encodeRoute (Corn.currentPath runtime1)
+      let (runtime1, outs, navs) = Route.step frameDt inputs runtime0
+          runtime2 = foldl' (flip Route.navigate) runtime1 navs
       putStrLn ("frame " <> show frameIx)
       putStrLn ("  inputs=" <> show inputs)
-      putStrLn ("  outbox=" <> show outbox)
-      putStrLn ("  active=" <> show activeNow)
-      putStrLn ("  " <> renderTicks (Corn.model runtime1))
-      putStrLn (renderPath runtime1)
-      go (frameIx + 1) runtime1 rest
+      putStrLn ("  outputs=" <> show outs)
+      putStrLn ("  nav=" <> show navs)
+      putStrLn ("  active(before-nav)=" <> show (Scene.locationSegments (Route.current runtime1)))
+      putStrLn ("  active(after-nav)=" <> show (Scene.locationSegments (Route.current runtime2)))
+      putStrLn (renderPath runtime2)
+      go (frameIx + 1) runtime2 rest

@@ -24,8 +24,8 @@ cabal run corn-examples -- scenes-navigation
 - `platformer`: single-actor gravity + periodic jump impulse loop.
 - `horde-survival`: moving player target with mob chase/attrition.
 - `bullet-hell`: periodic radial bullet burst spawning + TTL cleanup.
-- `scenes-navigation`: `Engine.Corn` facade example (`Corn.game`, `Corn.start`, `Corn.step`)
-  with route-table codecs (`Corn.routeTable`) and single-stack command-driven navigation.
+- `scenes-navigation`: `Engine.Data.Router` tree example (`Route.create`, `Route.step`, `Route.navigate`)
+  with nested layout stacks and route-local navigation output.
 
 ## Modeling Notes
 

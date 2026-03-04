@@ -66,8 +66,8 @@ Benchmarks focus on quick, game‑like scenarios so iteration stays fast.
 - `program/10k+1/eachm`: same as `program/10k/eachm` but with 10k+1 entities.
 - `scene/history/nav-cycle`: path edits + `back`/`forward` history traversal.
 - `scene/corn/simple-step`: high-level `Engine.Corn` loop (`game` + `start` + `step`).
-- `scene/router/simple-enter`: legacy static router `gotoPath` + `sync`.
-- `scene/router/runtime-step`: runtime router loop (`create` + `step` + `navigate`).
+- `scene/router/simple-enter`: tree router loop (`create` + `step` + `navigate`) with search defaults.
+- `scene/router/runtime-step`: route event loop (`Entered`/`Exited`/`BecameTop`/`LeftTop`) with history navigation.
 - `scene/path/goto-cycle`: single-segment path replacements with `goto`.
 
 Benchmark timing is reported per benchmark workload invocation, not per individual
@@ -829,9 +829,91 @@ resetScore :: E.Entity -> Patch
 resetScore e = S.at e (S.update (const (Score 0))) -- or S.at e (S.set (Score 0))
 ```
 
-## Game Flow (Recommended API)
+## Router Flow (Recommended)
 
-`Engine.Corn` is now the default surface: one obvious way to build and step games.
+`Engine.Data.Router` is the hard-break routing API: static route tree, one runtime,
+one loop (`create -> step -> render -> navigate`).
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeApplications #-}
+
+import Data.List (foldl')
+import qualified Engine.Data.Router as Route
+import qualified Engine.Data.Scene as Scene
+import GHC.Generics (Generic)
+
+data Msg = UiOpenOptions | UiCloseTop | UiStartGame | UiBackToMenu
+  deriving (Eq, Show)
+
+newtype OptionsSearch = OptionsSearch
+  { tab :: [String]
+  } deriving (Eq, Show, Generic, Route.SearchCodec)
+
+data Out = Out String [Route.RouteEvent]
+  deriving (Eq, Show)
+
+menuRoute :: Route.Route "/main-menu" Int Msg Out ()
+menuRoute =
+  Route.route
+    (\_ () -> 0)
+    (\ctx _ inbox n ->
+      let n1 = n + 1
+          navs =
+            [Route.Push "/main-menu/options" | UiOpenOptions `elem` inbox]
+              <> [Route.Replace "/game" | UiStartGame `elem` inbox]
+      in (n1, [Out "/main-menu" (Route.ctxEvents ctx)], navs)
+    )
+    (Just ())
+
+optionsRoute :: Route.Route "/main-menu/options" Int Msg Out OptionsSearch
+optionsRoute =
+  Route.route
+    (\_ (OptionsSearch tabs) -> length tabs)
+    (\ctx _ inbox n ->
+      let n1 = n + 1
+          navs = [Route.Back | UiCloseTop `elem` inbox]
+      in (n1, [Out "/main-menu/options" (Route.ctxEvents ctx)], navs)
+    )
+    (Just (OptionsSearch ["audio"]))
+
+gameRoute :: Route.Route "/game" Int Msg Out ()
+gameRoute =
+  Route.route
+    (\_ () -> 0)
+    (\ctx _ inbox n ->
+      let n1 = n + 1
+          navs = [Route.Replace "/main-menu" | UiBackToMenu `elem` inbox]
+      in (n1, [Out "/game" (Route.ctxEvents ctx)], navs)
+    )
+    (Just ())
+
+routes :: Route.Routes Int Msg Out '[ "/main-menu", "/main-menu/options", "/game" ]
+routes =
+  Route.node menuRoute
+    ( Route.leaf optionsRoute
+        Route.:> Route.EmptyRoutes
+    )
+    Route.:> Route.leaf gameRoute
+    Route.:> Route.EmptyRoutes
+
+tick :: Double -> [Msg] -> Route.Runtime Int Msg Out paths -> Route.Runtime Int Msg Out paths
+tick dt inbox rt0 =
+  let (rt1, outs, navs) = Route.step dt inbox rt0
+      _render = outs
+      rt2 = foldl' (flip Route.navigate) rt1 navs
+  in rt2
+
+-- locationSegments (Route.current rt) gives the active stack:
+-- ["/main-menu", "/main-menu/options"] when options is nested under main-menu.
+-- If "/main-menu/options" is top-level in the tree, active stack is ["/main-menu/options"].
+```
+
+## Corn Facade Flow
+
+`Engine.Corn` is a higher-level game facade over route/layer navigation.
 
 ```haskell
 import qualified Engine.Corn as Corn

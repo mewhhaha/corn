@@ -4,11 +4,15 @@ module Engine.Data.Router
   , SearchCodec
   , HasPath
   , RouteEvent(..)
-  , StepCtx(..)
-  , StepRoute
-  , stepRoute
-  , StepRoutes(EmptyStepRoutes, (:>>))
-  , StepRouter
+  , Params
+  , param
+  , Ctx(..)
+  , Route
+  , route
+  , RouteTree
+  , leaf
+  , node
+  , Routes(EmptyRoutes, (:>))
   , Nav(..)
   , Runtime
   , create
@@ -17,53 +21,29 @@ module Engine.Data.Router
   , current
   , canGoBack
   , canGoForward
-  , SceneMap
-  , active
-  , Params
-  , param
-  , route
-  , Route(..)
-  , Routes(EmptyRoutes, (:>))
-  , Router
-  , createRouter
-  , sync
-  , goto
-  , gotoPath
-  , back
-  , forward
   ) where
 
 import Engine.Data.Route.Simple
-  ( HasPath
+  ( Ctx(..)
+  , HasPath
   , Nav(..)
   , Params
-  , Route(..)
+  , Route
   , RouteEvent(..)
-  , Runtime
-  , Router
+  , RouteTree
   , Routes(EmptyRoutes, (:>))
-  , StepCtx(..)
-  , StepRoute
-  , StepRouter
-  , StepRoutes(EmptyStepRoutes, (:>>))
-  , SceneMap
+  , Runtime
   , SearchCodec
   , SearchParams
   , UrlParams
-  , active
   , canGoBack
   , canGoForward
   , create
-  , createRouter
   , current
+  , leaf
   , navigate
-  , step
-  , stepRoute
-  , sync
-  , goto
-  , gotoPath
-  , back
-  , forward
+  , node
   , param
   , route
+  , step
   )

@@ -34,8 +34,6 @@ import Prelude
 
 import qualified Data.Map.Strict as Map
 import qualified Engine.Corn as Corn
-import qualified Engine.Data.ECS as E
-import qualified Engine.Data.Program as S
 import qualified Engine.Data.Router as Route
 import qualified Engine.Data.Scene as Scene
 import GHC.Generics (Generic)
@@ -52,15 +50,6 @@ newtype SimpleSearch = SimpleSearch
   { mode :: [String]
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (Route.SearchCodec)
-
-newtype SimpleTag = SimpleTag String
-  deriving stock (Eq, Show, Generic)
-
-data SimpleC
-  = CSimpleTag SimpleTag
-  deriving stock (Generic)
-
-instance E.ComponentId SimpleC
 
 data RuntimeMsg = RuntimeMsg
   { rmRoute :: String
@@ -141,196 +130,217 @@ scene_history_pathwith_params =
       && Scene.locationUrlParams cur1 == Map.empty
       && Scene.locationSearchParams cur1 == Map.empty
 
-mkSimpleScene :: String -> Scene.SceneRuntime SimpleC ()
-mkSimpleScene tag =
-  let (_, w1) = E.spawn (SimpleTag tag) (E.emptyWorld :: E.World SimpleC)
-      g1 = S.graph (pure ())
-  in Scene.mkScene w1 g1
+data RuntimeOut = RuntimeOut
+  { outRoute :: !String
+  , outId :: !(Maybe String)
+  , outTabs :: ![String]
+  } deriving (Eq, Show)
 
-sceneTag :: Scene.SceneRuntime SimpleC () -> Maybe String
-sceneTag rt =
-  let q = (E.comp :: E.Query SimpleC SimpleTag)
-  in case E.runq q (Scene.sceneRuntimeWorld rt) of
-    (_, SimpleTag tag) : _ -> Just tag
-    [] -> Nothing
-
-activeSceneAt ::
-  String ->
-  Scene.History String ->
-  Route.SceneMap c msg ->
-  Maybe (Scene.SceneRuntime c msg)
-activeSceneAt sid h scenes =
-  case [rt | (sid', rt) <- Route.active h scenes, sid' == sid] of
-    rt : _ -> Just rt
-    [] -> Nothing
-
-simpleRoutes :: Route.Routes SimpleC () '[ "/hello/world/{:id}" ]
-simpleRoutes =
-  Route.route @"/hello/world/{:id}"
-    (\params (SimpleSearch tabs) ->
-      let ident = Route.param @"id" params
-      in mkSimpleScene (ident <> ":" <> show tabs)
+simpleRoute :: Route.Route "/hello/world/{:id}" Int RuntimeMsg RuntimeOut SimpleSearch
+simpleRoute =
+  Route.route
+    (\params (SimpleSearch tabs) -> length tabs + length (Route.param @"id" params))
+    (\ctx _ _ n ->
+      let ident = Route.param @"id" (Route.ctxParams ctx)
+          tabs = mode (Route.ctxSearch ctx)
+      in (n + 1, [RuntimeOut "/hello/world" (Just ident) tabs], [])
     )
     (Just (SimpleSearch ["stats"]))
+
+simpleRoutes :: Route.Routes Int RuntimeMsg RuntimeOut '[ "/hello/world/{:id}" ]
+simpleRoutes =
+  Route.leaf simpleRoute
     Route.:> Route.EmptyRoutes
 
 scene_route_simple_dsl :: Bool
 scene_route_simple_dsl =
-  case Route.createRouter simpleRoutes of
+  case Route.create simpleRoutes "/hello/world/42" of
     Left _ -> False
-    Right router ->
-      let h0 = Scene.history @'["/start"]
-          (h1, scenes1) = Route.gotoPath Scene.Push "/hello/world/42" router h0
-          loc = Scene.current h1
-          enteredDefault = sceneTag =<< activeSceneAt "/hello/world" h1 scenes1
-          locOverride =
-            loc
-              { Scene.locationSearchParams = Map.fromList [("mode", ["advanced"])]
-              }
-          scenesOverride =
-            Route.sync router (Scene.historyAt locOverride)
-          enteredOverride =
-            sceneTag =<< activeSceneAt "/hello/world" (Scene.historyAt locOverride) scenesOverride
+    Right rt0 ->
+      let (rt1, out1, nav1) = Route.step 0.016 [] rt0
+          loc = Route.current rt1
       in Scene.locationSegments loc == ["/hello/world"]
           && Scene.locationUrlParams loc == Map.fromList [("id", "42")]
-          && enteredDefault == Just "42:[\"stats\"]"
-          && enteredOverride == Just "42:[\"advanced\"]"
+          && out1 == [RuntimeOut "/hello/world" (Just "42") ["stats"]]
+          && null nav1
 
-specificityRoutes :: Route.Routes SimpleC () '[ "/a/b/{:id}", "/a/b/c" ]
+specificityRoutes :: Route.Routes Int RuntimeMsg RuntimeOut '[ "/a/b/{:id}", "/a/b/c" ]
 specificityRoutes =
-  Route.route @"/a/b/{:id}" (\_ () -> mkSimpleScene "dyn") (Just ())
-    Route.:> Route.route @"/a/b/c" (\_ () -> mkSimpleScene "lit") (Just ())
-    Route.:> Route.EmptyRoutes
+  Route.leaf
+    ( Route.route
+        @"/a/b/{:id}"
+        (\_ () -> 0)
+        (\ctx _ _ n -> (n + 1, [RuntimeOut "/a/b" (Just (Route.param @"id" (Route.ctxParams ctx))) []], []))
+        (Just ())
+    )
+    Route.:>
+      Route.leaf
+        ( Route.route
+            @"/a/b/c"
+            (\_ () -> 0)
+            (\_ _ _ n -> (n + 1, [RuntimeOut "/a/b/c" Nothing []], []))
+            (Just ())
+        )
+      Route.:>
+      Route.EmptyRoutes
 
 scene_route_specificity_prefers_literal :: Bool
 scene_route_specificity_prefers_literal =
-  case Route.createRouter specificityRoutes of
+  case Route.create specificityRoutes "/a/b/c" of
     Left _ -> False
-    Right router ->
-      let h0 = Scene.history @'["/start"]
-          (h1, _) = Route.gotoPath Scene.Push "/a/b/c" router h0
-          (h2, _) = Route.gotoPath Scene.Push "/a/b/e" router h1
-          loc1 = Scene.current h1
-          loc2 = Scene.current h2
-      in Scene.locationUrlParams loc1 == Map.empty
+    Right rt0 ->
+      let (rt1, out1, _) = Route.step 0.016 [] rt0
+          rt2 = Route.navigate (Route.Push "/a/b/e") rt1
+          (rt3, out2, _) = Route.step 0.016 [] rt2
+          loc2 = Route.current rt3
+      in out1 == [RuntimeOut "/a/b/c" Nothing []]
+          && out2 ==
+               [ RuntimeOut "/a/b/c" Nothing []
+               , RuntimeOut "/a/b" (Just "e") []
+               ]
           && Scene.locationUrlParams loc2 == Map.fromList [("id", "e")]
 
-typedGotoRoutes :: Route.Routes SimpleC () '[ "/main-menu", "/main-menu/options" ]
-typedGotoRoutes =
-  Route.route @"/main-menu" (\_ () -> mkSimpleScene "menu") (Just ())
-    Route.:> Route.route @"/main-menu/options" (\_ () -> mkSimpleScene "options") (Just ())
+menuRoute :: Route.Route "/main-menu" Int RuntimeMsg RuntimeOut ()
+menuRoute =
+  Route.route
+    (\_ () -> 0)
+    (\_ _ _ n -> (n + 1, [RuntimeOut "/main-menu" Nothing []], []))
+    (Just ())
+
+optionsRoute :: Route.Route "/main-menu/options" Int RuntimeMsg RuntimeOut ()
+optionsRoute =
+  Route.route
+    (\_ () -> 0)
+    (\_ _ _ n -> (n + 1, [RuntimeOut "/main-menu/options" Nothing []], []))
+    (Just ())
+
+nestedRoutes :: Route.Routes Int RuntimeMsg RuntimeOut '[ "/main-menu", "/main-menu/options" ]
+nestedRoutes =
+  Route.node menuRoute
+    ( Route.leaf optionsRoute
+        Route.:> Route.EmptyRoutes
+    )
+    Route.:> Route.EmptyRoutes
+
+flatRoutes :: Route.Routes Int RuntimeMsg RuntimeOut '[ "/main-menu", "/main-menu/options" ]
+flatRoutes =
+  Route.leaf menuRoute
+    Route.:> Route.leaf optionsRoute
     Route.:> Route.EmptyRoutes
 
 scene_route_simple_typed_goto :: Bool
 scene_route_simple_typed_goto =
-  case Route.createRouter typedGotoRoutes of
-    Left _ -> False
-    Right router ->
-      let h0 = Scene.history @'["/main-menu"]
-          (h1, _) = Route.goto @"/main-menu/options" Scene.Push router h0
-      in Scene.locationSegments (Scene.current h1) == ["/main-menu", "/main-menu/options"]
+  case (Route.create nestedRoutes "/main-menu", Route.create flatRoutes "/main-menu/options") of
+    (Right nestedRt0, Right flatRt0) ->
+      let nestedRt1 = Route.navigate (Route.Push "/main-menu/options") nestedRt0
+          nestedSegments = Scene.locationSegments (Route.current nestedRt1)
+          flatSegments = Scene.locationSegments (Route.current flatRt0)
+      in nestedSegments == ["/main-menu", "/main-menu/options"]
+          && flatSegments == ["/main-menu/options"]
+    _ -> False
 
 scene_route_simple_back_forward :: Bool
 scene_route_simple_back_forward =
-  case Route.createRouter typedGotoRoutes of
+  case Route.create nestedRoutes "/main-menu" of
     Left _ -> False
-    Right router ->
-      let h0 = Scene.history @'["/main-menu"]
-          (h1, _) = Route.goto @"/main-menu/options" Scene.Push router h0
-          (h2, scenes2) = Route.back router h1
-          (h3, scenes3) = Route.forward router h2
-      in Scene.locationSegments (Scene.current h2) == ["/main-menu"]
-          && hasScene "/main-menu" h2 scenes2
-          && not (hasScene "/main-menu/options" h2 scenes2)
-          && Scene.locationSegments (Scene.current h3) == ["/main-menu", "/main-menu/options"]
-          && hasScene "/main-menu/options" h3 scenes3
+    Right rt0 ->
+      let rt1 = Route.navigate (Route.Push "/main-menu/options") rt0
+          rt2 = Route.navigate Route.Back rt1
+          rt3 = Route.navigate Route.Forward rt2
+      in Scene.locationSegments (Route.current rt2) == ["/main-menu"]
+          && Scene.locationSegments (Route.current rt3) == ["/main-menu", "/main-menu/options"]
+          && Route.canGoBack rt3
+          && not (Route.canGoForward rt3)
 
 scene_route_simple_search_keys_strict :: Bool
 scene_route_simple_search_keys_strict =
-  case Route.createRouter simpleRoutes of
+  case Route.create simpleRoutes "/hello/world/42" of
     Left _ -> False
-    Right router ->
-      let h0 = Scene.history @'["/start"]
-          (h1, _) = Route.gotoPath Scene.Push "/hello/world/42" router h0
-          badLoc =
-            (Scene.current h1)
-              { Scene.locationSearchParams = Map.fromList [("wrong", ["x"])]
-              }
-          badScenes = Route.sync router (Scene.historyAt badLoc)
-      in case activeSceneAt "/hello/world" (Scene.historyAt badLoc) badScenes of
-          Nothing -> True
-          Just _ -> False
+    Right rt0 ->
+      let rt1 = Route.navigate (Route.ReplaceWith "/hello/world/9" (Map.fromList [("mode", ["advanced"])])) rt0
+          (rt2, out2, _) = Route.step 0.016 [] rt1
+          rt3 = Route.navigate (Route.Replace "/hello/world/7") rt2
+          (_, out3, _) = Route.step 0.016 [] rt3
+      in out2 == [RuntimeOut "/hello/world" (Just "9") ["advanced"]]
+          && out3 == [RuntimeOut "/hello/world" (Just "7") ["stats"]]
 
-duplicateSimpleRoutes :: Route.Routes SimpleC () '[ "/players/{:id}", "/players/{:slug}" ]
+duplicateSimpleRoutes :: Route.Routes Int RuntimeMsg RuntimeOut '[ "/players/{:id}", "/players/{:slug}" ]
 duplicateSimpleRoutes =
-  Route.route @"/players/{:id}" (\_ () -> mkSimpleScene "id") (Just ())
-    Route.:> Route.route @"/players/{:slug}" (\_ () -> mkSimpleScene "slug") (Just ())
-    Route.:> Route.EmptyRoutes
+  Route.leaf
+    (Route.route @"/players/{:id}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [], [])) (Just ()))
+    Route.:>
+      Route.leaf
+        (Route.route @"/players/{:slug}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [], [])) (Just ()))
+      Route.:>
+      Route.EmptyRoutes
 
 scene_route_simple_rejects_duplicate_leaves :: Bool
 scene_route_simple_rejects_duplicate_leaves =
-  case Route.createRouter duplicateSimpleRoutes of
+  case Route.create duplicateSimpleRoutes "/players/1" of
     Left _ -> True
     Right _ -> False
 
-hasScene :: String -> Scene.History String -> Route.SceneMap c msg -> Bool
-hasScene sid h scenes =
-  case activeSceneAt sid h scenes of
-    Just _ -> True
-    Nothing -> False
-
-runtimeRoutes :: Route.StepRoutes Int RuntimeMsg '[ "/main-menu", "/main-menu/options" ]
+runtimeRoutes :: Route.Routes Int RuntimeMsg RuntimeMsg '[ "/main-menu", "/main-menu/options" ]
 runtimeRoutes =
-  Route.stepRoute @"/main-menu"
-    (\_ () -> 0)
-    (\ctx _ _ n ->
-      ( n + 1
-      , [RuntimeMsg "/main-menu" (Route.stepEvents ctx)]
-      )
-    )
-    (Just ())
-    Route.:>>
-      Route.stepRoute @"/main-menu/options"
+  Route.node
+    ( Route.route
         (\_ () -> 0)
         (\ctx _ _ n ->
           ( n + 1
-          , [RuntimeMsg "/main-menu/options" (Route.stepEvents ctx)]
+          , [RuntimeMsg "/main-menu" (Route.ctxEvents ctx)]
+          , []
           )
         )
         (Just ())
-      Route.:>>
-      Route.EmptyStepRoutes
+    )
+    ( Route.leaf
+        ( Route.route
+            (\_ () -> 0)
+            (\ctx _ _ n ->
+              ( n + 1
+              , [RuntimeMsg "/main-menu/options" (Route.ctxEvents ctx)]
+              , []
+              )
+            )
+            (Just ())
+        )
+        Route.:> Route.EmptyRoutes
+    )
+    Route.:> Route.EmptyRoutes
 
 scene_route_runtime_step_events :: Bool
 scene_route_runtime_step_events =
   case Route.create runtimeRoutes "/main-menu" of
     Left _ -> False
     Right rt0 ->
-      let (rt1, out1) = Route.step 0.016 [] rt0
-          rt2 = Route.navigate (Route.Goto Scene.Push "/main-menu/options") rt1
-          (rt3, out2) = Route.step 0.016 [] rt2
+      let (rt1, out1, nav1) = Route.step 0.016 [] rt0
+          rt2 = Route.navigate (Route.Push "/main-menu/options") rt1
+          (rt3, out2, nav2) = Route.step 0.016 [] rt2
           rt4 = Route.navigate Route.Back rt3
-          (rt5, out3) = Route.step 0.016 [] rt4
+          (rt5, out3, nav3) = Route.step 0.016 [] rt4
       in out1 == [RuntimeMsg "/main-menu" [Route.Entered, Route.BecameTop]]
+          && null nav1
           && out2 ==
                [ RuntimeMsg "/main-menu" [Route.LeftTop]
                , RuntimeMsg "/main-menu/options" [Route.Entered, Route.BecameTop]
                ]
+          && null nav2
           && out3 ==
                [ RuntimeMsg "/main-menu/options" [Route.Exited, Route.LeftTop]
                , RuntimeMsg "/main-menu" [Route.BecameTop]
                ]
+          && null nav3
           && Scene.locationSegments (Route.current rt5) == ["/main-menu"]
           && not (Route.canGoBack rt5)
           && Route.canGoForward rt5
 
-duplicatePatternRoutes :: Route.StepRoutes Int () '[ "/dup", "/dup" ]
+duplicatePatternRoutes :: Route.Routes Int () () '[ "/dup", "/dup" ]
 duplicatePatternRoutes =
-  Route.stepRoute @"/dup" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
-    Route.:>>
-      Route.stepRoute @"/dup" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
-      Route.:>>
-      Route.EmptyStepRoutes
+  Route.leaf (Route.route @"/dup" (\_ () -> 0) (\_ _ _ n -> (n + 1, [], [])) (Just ()))
+    Route.:>
+      Route.leaf (Route.route @"/dup" (\_ () -> 0) (\_ _ _ n -> (n + 1, [], [])) (Just ()))
+      Route.:>
+      Route.EmptyRoutes
 
 scene_route_runtime_rejects_duplicate_patterns :: Bool
 scene_route_runtime_rejects_duplicate_patterns =
@@ -338,13 +348,13 @@ scene_route_runtime_rejects_duplicate_patterns =
     Left _ -> True
     Right _ -> False
 
-duplicateLeafRoutes :: Route.StepRoutes Int () '[ "/players/{:id}", "/players/{:slug}" ]
+duplicateLeafRoutes :: Route.Routes Int () () '[ "/players/{:id}", "/players/{:slug}" ]
 duplicateLeafRoutes =
-  Route.stepRoute @"/players/{:id}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
-    Route.:>>
-      Route.stepRoute @"/players/{:slug}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [])) (Just ())
-      Route.:>>
-      Route.EmptyStepRoutes
+  Route.leaf (Route.route @"/players/{:id}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [], [])) (Just ()))
+    Route.:>
+      Route.leaf (Route.route @"/players/{:slug}" (\_ () -> 0) (\_ _ _ n -> (n + 1, [], [])) (Just ()))
+      Route.:>
+      Route.EmptyRoutes
 
 scene_route_runtime_rejects_duplicate_leaves :: Bool
 scene_route_runtime_rejects_duplicate_leaves =

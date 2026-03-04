@@ -112,9 +112,9 @@ main = do
   assert "scene historyAt params" scene_history_pathwith_params
   assert "scene simple route dsl compiles and validates params" scene_route_simple_dsl
   assert "scene route specificity prefers literal over param" scene_route_specificity_prefers_literal
-  assert "scene simple route has typed goto over registered paths" scene_route_simple_typed_goto
-  assert "scene simple route back/forward wraps history plus sync" scene_route_simple_back_forward
-  assert "scene simple route rejects invalid search keys" scene_route_simple_search_keys_strict
+  assert "scene route tree controls stacked layouts for nested vs flat routes" scene_route_simple_typed_goto
+  assert "scene route back/forward navigates runtime history" scene_route_simple_back_forward
+  assert "scene route search params support explicit override and default fallback" scene_route_simple_search_keys_strict
   assert "scene simple route rejects duplicate leaves" scene_route_simple_rejects_duplicate_leaves
   assert "scene runtime route events + navigation step loop" scene_route_runtime_step_events
   assert "scene runtime rejects duplicate route patterns" scene_route_runtime_rejects_duplicate_patterns
