@@ -6,8 +6,8 @@ module Examples.HordeSurvival
   ) where
 
 import GHC.Generics (Generic)
-import qualified Engine.Data.ECS as E
-import qualified Engine.Data.Program as S
+import qualified Engine.Corn as S
+import qualified Engine.Corn.World as E
 
 data PlayerTag = PlayerTag
   deriving (Eq, Show)
@@ -79,11 +79,11 @@ hordeProg :: ProgramM () ()
 hordeProg = do
   t <- S.time
   dt <- S.dt
-  mobs <- S.await $ S.collect (E.query @MobRow @C)
+  mobs <- S.await $ S.pass @C @() $ S.collect (S.query @MobRow @C)
   let px = 6 * cos (0.8 * t)
       py = 6 * sin (0.8 * t)
       playerPos = Pos px py
-      playerVel = Vel (-4.8 * sin (0.8 * t)) (4.8 * cos (0.8 * t))
+      playerVel = Vel (- (4.8 * sin (0.8 * t))) (4.8 * cos (0.8 * t))
       contactRadius = 1.1
       hitCount =
         length
@@ -95,25 +95,27 @@ hordeProg = do
           ]
       hitDamage = hitCount `quot` 12
   _ <- S.await $
-    S.eachM @PlayerRow $ \(PlayerRow _ _ _ (Hp hp)) ->
-      S.edit (S.set playerPos <> S.set playerVel <> S.set (Hp (max 0 (hp - hitDamage))))
+    S.pass @C @() $
+      S.eachM @PlayerRow @C @() $ \(PlayerRow _ _ _ (Hp hp)) ->
+        S.edit (S.set playerPos <> S.set playerVel <> S.set (Hp (max 0 (hp - hitDamage))))
   _ <- S.await $
-    S.eachM @MobRow $ \(MobRow _ (Pos x y) _ (Hp hp)) -> do
-      let dx = px - x
-          dy = py - y
-          dist = sqrt (dx * dx + dy * dy + 1.0e-9)
-          speed = 8
-          vx = speed * dx / dist
-          vy = speed * dy / dist
-          xNext = x + vx * dt
-          yNext = y + vy * dt
-          hpNext =
-            if dist < 0.85
-              then hp - 1
-              else hp
-      if hpNext <= 0
-        then S.edit (S.set (Hp 0) <> S.del @MobTag <> S.del @Vel)
-        else S.edit (S.set (Pos xNext yNext) <> S.set (Vel vx vy) <> S.set (Hp hpNext))
+    S.pass @C @() $
+      S.eachM @MobRow @C @() $ \(MobRow _ (Pos x y) _ (Hp hp)) -> do
+        let dx = px - x
+            dy = py - y
+            dist = sqrt (dx * dx + dy * dy + 1.0e-9)
+            speed = 8
+            vx = speed * dx / dist
+            vy = speed * dy / dist
+            xNext = x + vx * dt
+            yNext = y + vy * dt
+            hpNext =
+              if dist < 0.85
+                then hp - 1
+                else hp
+        if hpNext <= 0
+          then S.edit (S.set (Hp 0) <> S.del @MobTag <> S.del @Vel)
+          else S.edit (S.set (Pos xNext yNext) <> S.set (Vel vx vy) <> S.set (Hp hpNext))
   pure ()
 
 graph0 :: Graph ()

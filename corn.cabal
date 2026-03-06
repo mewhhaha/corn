@@ -21,26 +21,21 @@ library
     import:           warnings
     exposed-modules:  Engine.Corn
                       Engine.Corn.Prelude
-                      Engine.Corn.Plugin
-                      Engine.Corn.Advanced
-                      Engine.Corn.Advanced.ECS
-                      Engine.Corn.Advanced.FRP
-                      Engine.Corn.Advanced.Input
-                      Engine.Corn.Advanced.Program
-                      Engine.Corn.Advanced.Route
-                      Engine.Corn.Advanced.Router
-                      Engine.Corn.Advanced.Scene
-                      Engine.Corn.Advanced.Transform
-                      Engine.Data.FRP
+                      Engine.Corn.World
+                      Engine.Corn.Query
+                      Engine.Corn.FRP
+                      Engine.Corn.Input
+                      Engine.Corn.Transform
+                      Engine.Corn.App
+                      Engine.Corn.App.Path
+    other-modules:    Engine.Data.FRP
                       Engine.Data.ECS
                       Engine.Data.Program
                       Engine.Data.Scene
                       Engine.Data.Route
-                      Engine.Data.Router
                       Engine.Data.Route.Simple
                       Engine.Data.Input
                       Engine.Data.Transform
-    -- other-modules:
     -- other-extensions:
     build-depends:    base ^>=4.21.0.0
                       , array

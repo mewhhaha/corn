@@ -6,9 +6,9 @@ module Examples.Platformer
   ) where
 
 import GHC.Generics (Generic)
-import qualified Engine.Data.ECS as E
-import qualified Engine.Data.FRP as F
-import qualified Engine.Data.Program as S
+import qualified Engine.Corn as S
+import qualified Engine.Corn.FRP as F
+import qualified Engine.Corn.World as E
 
 data Player = Player
   deriving (Eq, Show)
@@ -62,23 +62,24 @@ platformerProg = do
   dt <- S.dt
   jumpNow <- fmap (not . null) (S.step (F.every jumpEvery) ())
   _ <- S.await $
-    S.eachM @PlayerRow $ \(PlayerRow _ (Y y) (Vy vy)) -> do
-      let vyFalling = vy + gravity * dt
-          vyWithJump =
-            if jumpNow && y <= 1.0e-6
-              then jumpImpulse
-              else vyFalling
-          yRaw = y + vyWithJump * dt
-          landed = yRaw <= 0
-          yNext =
-            if landed
-              then 0
-              else yRaw
-          vyNext =
-            if landed && vyWithJump < 0
-              then 0
-              else vyWithJump
-      S.edit (S.set (Y yNext) <> S.set (Vy vyNext))
+    S.pass @C @() $
+      S.eachM @PlayerRow @C @() $ \(PlayerRow _ (Y y) (Vy vy)) -> do
+        let vyFalling = vy + gravity * dt
+            vyWithJump =
+              if jumpNow && y <= 1.0e-6
+                then jumpImpulse
+                else vyFalling
+            yRaw = y + vyWithJump * dt
+            landed = yRaw <= 0
+            yNext =
+              if landed
+                then 0
+                else yRaw
+            vyNext =
+              if landed && vyWithJump < 0
+                then 0
+                else vyWithJump
+        S.edit (S.set (Y yNext) <> S.set (Vy vyNext))
   pure ()
 
 graph0 :: Graph ()

@@ -73,7 +73,7 @@ main = do
   assert "since" (approxList sOut [0.1, 0.0, 0.1])
 
   let w0 = E.emptyWorld
-      (e1, w1) = E.spawn ((10 :: Int), ("hi" :: String)) (w0 :: World)
+      (e1, w1) = E.spawn (10 :: Int, "hi" :: String) (w0 :: World)
   assert "get" (E.get e1 w1 == Just (10 :: Int))
 
   let w2 = E.set e1 True w1
@@ -83,48 +83,42 @@ main = do
       qOut = E.runq q w2
   assert "query" (qOut == [(e1, 10)])
 
-  assert "program resume" program_resume_once
-  assert "program await value" program_await_value
-  assert "each per-entity" program_eachm_entity_state
-  assert "eachM enemy ai state machine" program_eachm_enemy_state_machine
-  assert "eachM independent loops" program_eachm_independent_loops
-  assert "step independent callsites" program_step_independent_callsites
-  assert "drive + del stops step updates" program_drive_del_stops
-  assert "each tuple query" program_each_tuple_query
-  assert "parallel kernel equivalence" program_parallel_kernel_equivalence
+  assert "program resume" programResumeOnce
+  assert "program await value" programAwaitValue
+  assert "each per-entity" programEachmEntityState
+  assert "eachM enemy ai state machine" programEachmEnemyStateMachine
+  assert "eachM independent loops" programEachmIndependentLoops
+  assert "step independent callsites" programStepIndependentCallsites
+  assert "drive + del stops step updates" programDriveDelStops
+  assert "each tuple query" programEachTupleQuery
+  assert "parallel kernel equivalence" programParallelKernelEquivalence
   assert "patch monoid identity" (prop_program_patch_identity 7)
   assert "patch monoid associativity" (prop_program_patch_assoc 11)
-  assert "compute fused order" program_compute_fused_order
-  assert "compute fused collect order" program_collect_fused_order
-  assert "event chain" program_event_chain
-  assert "await sticky same-frame merge" program_await_sticky_same_frame
-  assert "await sticky across frames" program_await_sticky_across_frames
-  assert "await sticky first match" program_await_sticky_first_match
-  assert "await sticky inline applicative" program_await_sticky_inline_applicative
-  assert "replay from inputs" program_replay_from_inputs
-  assert "snapshot roundtrip (replay-backed graph)" program_snapshot_roundtrip
-  assert "scene stack push/pop roundtrip" scene_push_pop_roundtrip
-  assert "scene nested path focus" scene_nested_path_focus
-  assert "scene replace primary stack" scene_replace_primary_stack
-  assert "scene history goto/back segments" scene_history_push_pop_segments
-  assert "scene history back/forward" scene_history_back_forward
-  assert "scene history clears forward on new nav" scene_history_back_clears_forward_on_new_nav
-  assert "scene historyAt params" scene_history_pathwith_params
-  assert "scene simple route dsl compiles and validates params" scene_route_simple_dsl
-  assert "scene route specificity prefers literal over param" scene_route_specificity_prefers_literal
-  assert "scene route tree controls stacked layouts for nested vs flat routes" scene_route_simple_typed_goto
-  assert "scene route back/forward navigates runtime history" scene_route_simple_back_forward
-  assert "scene route search params support explicit override and default fallback" scene_route_simple_search_keys_strict
-  assert "scene simple route rejects duplicate leaves" scene_route_simple_rejects_duplicate_leaves
-  assert "scene runtime route events + navigation step loop" scene_route_runtime_step_events
-  assert "scene runtime rejects duplicate route patterns" scene_route_runtime_rejects_duplicate_patterns
-  assert "scene runtime rejects duplicate route leaves" scene_route_runtime_rejects_duplicate_leaves
-  assert "corn simple facade loop navigation" scene_corn_simple_navigation_loop
-  assert "corn deferred navigation applies next frame" scene_corn_deferred_navigation_snapshot
-  assert "corn quit command is terminal in-frame" scene_corn_quit_is_terminal
-  assert "corn plugin step runs each frame" scene_corn_plugin_step_runs
-  assert "corn layerFromInboxAt helper reduces plumbing" scene_corn_layer_from_inbox_helper
-  assert "corn intentGame centralizes nav interpretation" scene_corn_intent_game_centralizes_navigation
+  assert "compute fused order" programComputeFusedOrder
+  assert "compute fused collect order" programCollectFusedOrder
+  assert "event chain" programEventChain
+  assert "await sticky same-frame merge" programResumeStickySameFrame
+  assert "await sticky across frames" programResumeStickyAcrossFrames
+  assert "await sticky first match" programResumeStickyFirstMatch
+  assert "await sticky inline applicative" programResumeStickyInlineApplicative
+  assert "replay from inputs" programReplayFromInputs
+  assert "snapshot roundtrip (replay-backed graph)" programSnapshotRoundtrip
+  assert "scene stack push/pop roundtrip" scenePushPopRoundtrip
+  assert "scene nested path focus" sceneNestedPathFocus
+  assert "scene replace primary stack" sceneReplacePrimaryStack
+  assert "scene history goto/back segments" sceneHistoryPushPopSegments
+  assert "scene history back/forward" sceneHistoryBackForward
+  assert "scene history clears forward on new nav" sceneHistoryBackClearsForwardOnNewNav
+  assert "scene historyAt params" sceneHistoryPathwithParams
+  assert "scene simple route dsl compiles and validates params" sceneRouteSimpleDsl
+  assert "scene route specificity prefers literal over param" sceneRouteSpecificityPrefersLiteral
+  assert "scene route tree controls stacked layouts for nested vs flat routes" sceneRouteSimpleTypedGoto
+  assert "scene route back/forward navigates runtime history" sceneRouteSimpleBackForward
+  assert "scene route search params support explicit override and default fallback" sceneRouteSimpleSearchKeysStrict
+  assert "scene simple route rejects duplicate leaves" sceneRouteSimpleRejectsDuplicateLeaves
+  assert "scene runtime route events + navigation step loop" sceneRouteRuntimeStepEvents
+  assert "scene runtime rejects duplicate route patterns" sceneRouteRuntimeRejectsDuplicatePatterns
+  assert "scene runtime rejects duplicate route leaves" sceneRouteRuntimeRejectsDuplicateLeaves
 
   results <-
     sequence

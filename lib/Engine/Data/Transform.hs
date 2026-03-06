@@ -23,6 +23,7 @@ module Engine.Data.Transform
 
 import Prelude
 
+import Data.Maybe (fromMaybe, isNothing)
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import Engine.Data.ECS (Entity, World)
@@ -85,13 +86,13 @@ inverse m =
     else
       let invDet = 1 / det
           i00 =  (a11 * a22 - a12 * a21) * invDet
-          i01 = -(a01 * a22 - a02 * a21) * invDet
+          i01 = -((a01 * a22 - a02 * a21) * invDet)
           i02 =  (a01 * a12 - a02 * a11) * invDet
-          i10 = -(a10 * a22 - a12 * a20) * invDet
+          i10 = -((a10 * a22 - a12 * a20) * invDet)
           i11 =  (a00 * a22 - a02 * a20) * invDet
-          i12 = -(a00 * a12 - a02 * a10) * invDet
+          i12 = -((a00 * a12 - a02 * a10) * invDet)
           i20 =  (a10 * a21 - a11 * a20) * invDet
-          i21 = -(a00 * a21 - a01 * a20) * invDet
+          i21 = -((a00 * a21 - a01 * a20) * invDet)
           i22 =  (a00 * a11 - a01 * a10) * invDet
           itx = -(i00 * tx + i01 * ty + i02 * tz)
           ity = -(i10 * tx + i11 * ty + i12 * tz)
@@ -196,7 +197,7 @@ children = E.out @ParentOf
 
 propagate :: (E.Component c Local, E.ComponentBit c Local, E.Component c Global, E.ComponentBit c Global) => World c -> World c
 propagate w0 =
-  let roots = Prelude.filter (\e -> parent e w0 == Nothing) (E.entities w0)
+  let roots = Prelude.filter (\e -> isNothing (parent e w0)) (E.entities w0)
   in foldl' (propRoot w0) w0 roots
 
 propRoot :: (E.Component c Local, E.ComponentBit c Local, E.Component c Global, E.ComponentBit c Global) => World c -> World c -> Entity -> World c
@@ -223,9 +224,7 @@ propChild w0 visited gp w e =
 
 localOrIdentity :: (E.Component c Local, E.ComponentBit c Local) => World c -> Entity -> Local
 localOrIdentity w e =
-  case E.get @Local e w of
-    Just l -> l
-    Nothing -> identityLocal
+  fromMaybe identityLocal (E.get @Local e w)
 
 toGlobal :: Local -> Global
 toGlobal (Local m) = Global m

@@ -204,7 +204,7 @@ collectTreeEntries ::
 collectTreeEntries parentStack tree =
   case tree of
     RouteLeaf routeDef ->
-      pure . pure =<< buildEntry parentStack routeDef
+      pure <$> buildEntry parentStack routeDef
     RouteNode routeDef children -> do
       entry <- buildEntry parentStack routeDef
       childEntries <- collectRoutesEntries (entryStack entry) children
@@ -396,10 +396,7 @@ runStepEntry sid loc events dt inbox states0 (Entry routeMeta _ expectedSegments
           providedSearch = selectKeys searchKeys (Scene.locationSearchParams loc)
           searchMap =
             if Map.null providedSearch
-              then
-                case defaults of
-                  Just defaultSearch -> Core.encodeSearchCodec defaultSearch
-                  Nothing -> Map.empty
+              then maybe Map.empty Core.encodeSearchCodec defaults
               else providedSearch
       in
         if not (sameKeyList searchKeys searchMap)
@@ -470,23 +467,15 @@ routeEventsFor sid entered exited prevTop currentTop =
   enteredEvents <> exitedEvents <> topEvents
   where
     enteredEvents =
-      if Set.member sid entered
-        then [Entered]
-        else []
+      [Entered | Set.member sid entered]
     exitedEvents =
-      if Set.member sid exited
-        then [Exited]
-        else []
+      [Exited | Set.member sid exited]
     topEvents =
       becameTopEvent <> leftTopEvent
     becameTopEvent =
-      if currentTop == Just sid && prevTop /= Just sid
-        then [BecameTop]
-        else []
+      [BecameTop | currentTop == Just sid && prevTop /= Just sid]
     leftTopEvent =
-      if prevTop == Just sid && currentTop /= Just sid
-        then [LeftTop]
-        else []
+      [LeftTop | prevTop == Just sid && currentTop /= Just sid]
 
 selectKeys :: [String] -> Map String a -> Map String a
 selectKeys keys m =

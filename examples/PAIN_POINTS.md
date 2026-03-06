@@ -4,10 +4,10 @@ Use this log to capture places where a concept was hard to express cleanly in `c
 
 ## 2026-02-22
 
-1. ~~`await` + `Batch` type inference in example modules was ambiguous for `msg`/`c` in multiple spots.~~
-   - Symptom: GHC errors around `S.await`/`S.eachM` with unresolved `Typeable msg`.
-   - Workaround used: explicit type applications (`@C @()`) for `eachM` and explicit `S.Batch C () ...` annotations for `collect`.
-   - Status: resolved by `AwaitableM`/`Batch` inference refactor in `Engine.Data.Program`.
+1. `await` + `pass` inference in standalone example modules still needs explicit `@C @()` in a few spots.
+   - Symptom: after the kernel-first `Engine.Corn` wrapper rewrite, `S.await $ S.pass $ ...` can leave `msg` floating when the batch itself does not mention messages.
+   - Workaround used: explicit `S.pass @C @()` and `S.eachM @Row @C @()` in the example modules.
+   - Status: current; the examples compile, but the wrapper can still be tightened further if we want those annotations gone again.
 
 2. Tuning concept behavior to stay informative without collapsing into trivial outcomes took iteration.
    - Symptom: initial horde simulation ended with `playerHp=0` and `aliveMobs=0`, which was a poor concept signal.
@@ -17,8 +17,7 @@ Use this log to capture places where a concept was hard to express cleanly in `c
    - Symptom: `-Wall` emitted redundant-import warnings in new example modules.
    - Adjustment used: remove explicit `Data.List` imports and rely on Prelude-provided `foldl'`.
 
-4. ~~Generic `await` inference needed stronger linkage between `ProgramM` and `Batch` parameters.~~
-   - Symptom: even with functional dependencies, `S.await $ S.eachM ...` and `S.await $ S.collect ...` still left `c/msg` ambiguous in example programs.
-   - Adjustment used: in `Engine.Data.Program`, make `AwaitableM` carry `m -> c msg`, then use an equality-constrained batch instance:
-     `instance (c' ~ c, msg' ~ msg) => AwaitableM c msg (ProgramM c msg) (Batch c' msg' a) a`.
-   - Status: resolved; examples now compile without explicit `Batch C ()` or `@C @()` disambiguation.
+4. Earlier `Engine.Data.Program` inference fixes do not fully transfer through the new `Engine.Corn` wrapper.
+   - Symptom: the lower-level package can still infer more than the public wrapper in some example-only call sites.
+   - Adjustment used: keep the examples explicit at the `pass` boundary instead of hiding the current public API cost.
+   - Status: current; acceptable for examples, but still a real ergonomics gap.

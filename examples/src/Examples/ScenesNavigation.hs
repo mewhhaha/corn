@@ -2,7 +2,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE TypeApplications #-}
 
 module Examples.ScenesNavigation
   ( runConcept
@@ -11,8 +10,8 @@ module Examples.ScenesNavigation
 import Prelude
 
 import Data.List (intercalate)
-import qualified Engine.Data.Router as Route
-import qualified Engine.Data.Scene as Scene
+import qualified Engine.Corn.App as Route
+import qualified Engine.Corn.App.Path as Path
 import GHC.Generics (Generic)
 
 data Msg
@@ -34,9 +33,9 @@ data SceneOut = SceneOut
   , outEvents :: ![Route.RouteEvent]
   } deriving (Eq, Show)
 
-menuRoute :: Route.Route "/main-menu" Int Msg SceneOut ()
+menuRoute :: Route.Layer "/main-menu" Int Msg SceneOut ()
 menuRoute =
-  Route.route
+  Route.layer
     (\_ () -> 0)
     (\ctx _ inbox ticks0 ->
       let ticks1 = ticks0 + 1
@@ -48,9 +47,9 @@ menuRoute =
     )
     (Just ())
 
-optionsRoute :: Route.Route "/main-menu/options" Int Msg SceneOut OptionsSearch
+optionsRoute :: Route.Layer "/main-menu/options" Int Msg SceneOut OptionsSearch
 optionsRoute =
-  Route.route
+  Route.layer
     (\_ (OptionsSearch tabs) -> length tabs)
     (\ctx _ inbox ticks0 ->
       let ticks1 = ticks0 + 1
@@ -59,9 +58,9 @@ optionsRoute =
     )
     (Just (OptionsSearch ["audio"]))
 
-gameRoute :: Route.Route "/game" Int Msg SceneOut ()
+gameRoute :: Route.Layer "/game" Int Msg SceneOut ()
 gameRoute =
-  Route.route
+  Route.layer
     (\_ () -> 0)
     (\ctx _ inbox ticks0 ->
       let ticks1 = ticks0 + 1
@@ -72,7 +71,7 @@ gameRoute =
 
 routes :: Route.Routes Int Msg SceneOut '[ "/main-menu", "/main-menu/options", "/game" ]
 routes =
-  Route.node menuRoute
+  Route.stack menuRoute
     ( Route.leaf optionsRoute
         Route.:> Route.EmptyRoutes
     )
@@ -93,7 +92,7 @@ scriptedInputs =
 
 renderPath :: Route.Runtime Int Msg SceneOut paths -> String
 renderPath runtime =
-  let segs = Scene.locationSegments (Route.current runtime)
+  let segs = Path.pathSegments (Route.current runtime)
   in unlines
       [ "path=" <> show segs
       , "path-render=" <> intercalate " > " segs
@@ -117,7 +116,7 @@ runConcept =
       putStrLn ("  inputs=" <> show inputs)
       putStrLn ("  outputs=" <> show outs)
       putStrLn ("  nav=" <> show navs)
-      putStrLn ("  active(before-nav)=" <> show (Scene.locationSegments (Route.current runtime1)))
-      putStrLn ("  active(after-nav)=" <> show (Scene.locationSegments (Route.current runtime2)))
+      putStrLn ("  active(before-nav)=" <> show (Path.pathSegments (Route.current runtime1)))
+      putStrLn ("  active(after-nav)=" <> show (Path.pathSegments (Route.current runtime2)))
       putStrLn (renderPath runtime2)
       go (frameIx + 1) runtime2 rest

@@ -184,8 +184,7 @@ goto mode @segment h =
   in gotoLocation mode (path [segment]) h
 
 gotoSegment :: Eq sid => GotoMode -> sid -> History sid -> History sid
-gotoSegment mode segment h =
-  gotoLocation mode (path [segment]) h
+gotoSegment mode segment = gotoLocation mode (path [segment])
 
 back :: History sid -> History sid
 back h =

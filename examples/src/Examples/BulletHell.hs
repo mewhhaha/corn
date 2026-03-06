@@ -6,10 +6,10 @@ module Examples.BulletHell
   ) where
 
 import GHC.Generics (Generic)
-import qualified Engine.Data.ECS as E
-import qualified Engine.Data.FRP as F
-import qualified Engine.Data.Program as S
 import Control.Monad (when)
+import qualified Engine.Corn as S
+import qualified Engine.Corn.FRP as F
+import qualified Engine.Corn.World as E
 
 data Emitter = Emitter
   deriving (Eq, Show)
@@ -85,19 +85,20 @@ bulletHellProg :: ProgramM () ()
 bulletHellProg = do
   dt <- S.dt
   fireNow <- fmap (not . null) (S.step (F.every spawnEvery) ())
-  emitters <- S.await $ S.collect (E.query @EmitterRow @C)
+  emitters <- S.await $ S.pass @C @() $ S.collect (S.query @EmitterRow @C)
   let origin =
         case emitters of
           (_, EmitterRow _ pos) : _ -> pos
           [] -> Pos 0 0
   when fireNow $ S.world (spawnBurstPatch origin)
   _ <- S.await $
-    S.eachM @BulletRow $ \(BulletRow _ (Pos x y) (Vel vx vy) (Life life)) -> do
-      let lifeNext = life - dt
-          posNext = Pos (x + vx * dt) (y + vy * dt)
-      if lifeNext <= 0
-        then S.edit (S.del @Bullet <> S.del @Vel <> S.del @Life)
-        else S.edit (S.set posNext <> S.set (Life lifeNext))
+    S.pass @C @() $
+      S.eachM @BulletRow @C @() $ \(BulletRow _ (Pos x y) (Vel vx vy) (Life life)) -> do
+        let lifeNext = life - dt
+            posNext = Pos (x + vx * dt) (y + vy * dt)
+        if lifeNext <= 0
+          then S.edit (S.del @Bullet <> S.del @Vel <> S.del @Life)
+          else S.edit (S.set posNext <> S.set (Life lifeNext))
   pure ()
 
 graph0 :: Graph ()

@@ -1,544 +1,264 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Engine.Corn
-  ( RouteCodec(..)
-  , RouteTable
-  , routeTable
-  , encodeBy
-  , decodeBy
-  , Nav(..)
-  , Cmd(..)
-  , RouteEvent(..)
-  , Frame(..)
-  , Layer
-  , layer
-  , layerWith
-  , layerFromInbox
-  , layerFromInboxAt
-  , LayerHooks(..)
-  , noLayerHooks
-  , CmdEffect(..)
-  , IntentLayer
-  , intentLayer
-  , intentLayerWith
-  , IntentLayerHooks(..)
-  , noIntentLayerHooks
-  , interpretIntentLayer
-  , Plugin
-  , plugin
-  , pluginWith
-  , PluginHooks(..)
-  , noPluginHooks
-  , Game
-  , game
-  , gameWith
-  , intentGame
-  , intentGameWith
-  , withPlugin
-  , withPlugins
-  , Runtime
-  , start
+  ( Kernel
+  , Graph
+  , Build
+  , Routine
+  , ProgramM
+  , Local
+  , Handle
+  , Pass
+  , Batch
+  , Wait
+  , Sticky
+  , Events
+  , DTime
+  , Patch
+  , EntityPatch
+  , Query
+  , kernel
+  , graph
+  , spawn
+  , program
+  , runFrame
+  , run
+  , event
+  , done
+  , waitSticky
+  , sticky
+  , flush
+  , pass
+  , await
+  , query
+  , collect
+  , each
+  , for
+  , eachM
+  , spawnEach
+  , send
+  , dt
+  , time
+  , sample
   , step
-  , current
-  , currentPath
-  , model
-  , canGoBack
-  , canGoForward
-  , isRunning
+  , world
+  , edit
+  , patch
+  , emptyPatch
+  , drive
+  , set
+  , update
+  , del
+  , at
+  , put
+  , relate
+  , unrelate
   ) where
 
 import Prelude
 
-import Data.Maybe (mapMaybe)
-import Engine.Data.FRP (DTime)
-import qualified Engine.Data.Scene as Scene
+import Data.Kind (Type)
+import GHC.Stack (HasCallStack)
+import Data.Typeable (Typeable)
+import qualified Engine.Data.ECS as E
+import qualified Engine.Data.FRP as F
+import qualified Engine.Data.Program as P
 
--- | Route values can be encoded/decoded for host integration (URL, save-state, etc).
-class RouteCodec route where
-  encodeRoute :: route -> String
-  decodeRoute :: String -> Maybe route
+type Kernel c msg = P.Graph c msg
+type Graph c msg = Kernel c msg
+type Build c msg = P.GraphM c msg
+type Routine c msg = P.ProgramM c msg
+type ProgramM c msg = Routine c msg
+type Local c msg = P.EntityM c msg
+type Handle a = P.Handle a
+type Pass c msg a = P.Batch c msg a
+type Batch c msg a = Pass c msg a
+type Events a = F.Events a
+type DTime = F.DTime
+type Patch c = P.Patch c
+type EntityPatch c = P.EntityPatch c
+type Query c a = E.Query c a
 
-newtype RouteTable route = RouteTable [(route, String)]
+data Scope
+  = KernelScope
+  | LocalScope
 
-routeTable :: [(route, String)] -> RouteTable route
-routeTable = RouteTable
+newtype Sticky msg a = Sticky (P.Sticky msg a)
 
-encodeBy :: (Eq route, Show route) => RouteTable route -> route -> String
-encodeBy (RouteTable table) routeId =
-  case lookup routeId table of
-    Just encoded -> encoded
-    Nothing -> error ("encodeBy: missing route mapping for " <> show routeId)
+instance Functor (Sticky msg) where
+  fmap f (Sticky inner) = Sticky (fmap f inner)
 
-decodeBy :: RouteTable route -> String -> Maybe route
-decodeBy (RouteTable table) pathText =
-  case [routeId | (routeId, routePath) <- table, routePath == pathText] of
-    routeId : _ -> Just routeId
-    [] -> Nothing
+instance Applicative (Sticky msg) where
+  pure = Sticky . pure
+  Sticky f <*> Sticky a = Sticky (f <*> a)
 
-data Nav route
-  = Push route
-  | Replace route
-  | Back
-  | Forward
-  deriving (Eq, Show)
+data Wait scope c msg a where
+  WaitEvent :: (msg -> Bool) -> Wait scope c msg (Events msg)
+  WaitDone :: Handle a -> Wait scope c msg a
+  WaitSticky :: Sticky msg a -> Wait scope c msg a
+  WaitFlush :: Wait 'KernelScope c msg ()
+  WaitPass :: Pass c msg a -> Wait 'KernelScope c msg a
 
-data Cmd route msg
-  = Emit msg
-  | Navigate (Nav route)
-  | Quit
-  deriving (Eq, Show)
+kernel :: Build c msg () -> Kernel c msg
+kernel = P.graph
 
-data RouteEvent
-  = Entered
-  | Exited
-  | BecameTop
-  | LeftTop
-  deriving (Eq, Show)
+graph :: Build c msg () -> Graph c msg
+graph = kernel
 
-data Frame route = Frame
-  { frameDt :: !DTime
-  , frameRoute :: !route
-  , framePath :: ![route]
-  , frameEvents :: ![RouteEvent]
-  , frameCanGoBack :: !Bool
-  , frameCanGoForward :: !Bool
-  } deriving (Eq, Show)
+spawn :: Routine c msg a -> Build c msg (Handle a)
+spawn = P.program
 
-data Layer model route msg = Layer
-  { layerEnter :: route -> model -> (model, [Cmd route msg])
-  , layerStep :: Frame route -> [msg] -> model -> (model, [Cmd route msg])
-  , layerExit :: route -> model -> (model, [Cmd route msg])
-  }
+program :: Routine c msg a -> Build c msg (Handle a)
+program = spawn
 
-data LayerHooks model route msg = LayerHooks
-  { onEnter :: route -> model -> (model, [Cmd route msg])
-  , onExit :: route -> model -> (model, [Cmd route msg])
-  }
+runFrame :: DTime -> E.World c -> Events msg -> Kernel c msg -> (E.World c, Events msg, Kernel c msg)
+runFrame = P.run
 
-noLayerHooks :: LayerHooks model route msg
-noLayerHooks =
-  LayerHooks
-    { onEnter = \_ mdl -> (mdl, [])
-    , onExit = \_ mdl -> (mdl, [])
-    }
+run :: DTime -> E.World c -> Events msg -> Graph c msg -> (E.World c, Events msg, Graph c msg)
+run = runFrame
 
-layer ::
-  (Frame route -> [msg] -> model -> (model, [Cmd route msg])) ->
-  Layer model route msg
-layer = layerWith noLayerHooks
+event :: (msg -> Bool) -> Wait scope c msg (Events msg)
+event = WaitEvent
 
-layerWith ::
-  LayerHooks model route msg ->
-  (Frame route -> [msg] -> model -> (model, [Cmd route msg])) ->
-  Layer model route msg
-layerWith hooks stepFn =
-  Layer
-    { layerEnter = onEnter hooks
-    , layerStep = stepFn
-    , layerExit = onExit hooks
-    }
+done :: Handle a -> Wait scope c msg a
+done = WaitDone
 
-layerFromInbox ::
-  (msg -> Maybe (Cmd route msg)) ->
-  Layer model route msg
-layerFromInbox toCmd =
-  layer $ \_ inbox model0 ->
-    (model0, mapMaybe toCmd inbox)
+waitSticky :: Sticky msg a -> Wait scope c msg a
+waitSticky = WaitSticky
 
-layerFromInboxAt ::
-  (route -> msg -> Maybe (Cmd route msg)) ->
-  route ->
-  Layer model route msg
-layerFromInboxAt toCmd routeId =
-  layerFromInbox (toCmd routeId)
+sticky :: (msg -> Maybe a) -> Sticky msg a
+sticky = Sticky . P.sticky
 
-data CmdEffect route msg
-  = Ignore
-  | One (Cmd route msg)
-  | Many [Cmd route msg]
-  deriving (Eq, Show)
+flush :: forall c msg. Wait 'KernelScope c msg ()
+flush = WaitFlush
 
-data IntentLayer model route msg intent = IntentLayer
-  { intentLayerEnter :: route -> model -> (model, [intent])
-  , intentLayerStep :: Frame route -> [msg] -> model -> (model, [intent])
-  , intentLayerExit :: route -> model -> (model, [intent])
-  }
+pass :: forall c msg a. Pass c msg a -> Wait 'KernelScope c msg a
+pass = WaitPass
 
-data IntentLayerHooks model route msg intent = IntentLayerHooks
-  { onIntentEnter :: route -> model -> (model, [intent])
-  , onIntentExit :: route -> model -> (model, [intent])
-  }
+class Awaitable m a b | m a -> b where
+  await :: a -> m b
 
-noIntentLayerHooks :: IntentLayerHooks model route msg intent
-noIntentLayerHooks =
-  IntentLayerHooks
-    { onIntentEnter = \_ mdl -> (mdl, [])
-    , onIntentExit = \_ mdl -> (mdl, [])
-    }
+instance Awaitable (P.ProgramM c msg) (Wait 'KernelScope c msg a) a where
+  await waitOn =
+    case waitOn of
+      WaitEvent p -> P.await p
+      WaitDone h -> P.await h
+      WaitSticky (Sticky s) -> P.await s
+      WaitFlush -> P.awaitUpdate
+      WaitPass b -> P.await b
 
-intentLayer ::
-  (Frame route -> [msg] -> model -> (model, [intent])) ->
-  IntentLayer model route msg intent
-intentLayer = intentLayerWith noIntentLayerHooks
+instance Awaitable (P.ProgramM c msg) (Handle a) a where
+  await = P.await
 
-intentLayerWith ::
-  IntentLayerHooks model route msg intent ->
-  (Frame route -> [msg] -> model -> (model, [intent])) ->
-  IntentLayer model route msg intent
-intentLayerWith hooks stepFn =
-  IntentLayer
-    { intentLayerEnter = onIntentEnter hooks
-    , intentLayerStep = stepFn
-    , intentLayerExit = onIntentExit hooks
-    }
+instance Awaitable (P.ProgramM c msg) (msg -> Bool) (Events msg) where
+  await = P.await
 
-interpretIntentLayer ::
-  (route -> intent -> CmdEffect route msg) ->
-  IntentLayer model route msg intent ->
-  Layer model route msg
-interpretIntentLayer interpret intentDef =
-  Layer
-    { layerEnter = \routeId model0 ->
-        let (model1, intents) = intentLayerEnter intentDef routeId model0
-        in (model1, concatMap (cmdEffectToList . interpret routeId) intents)
-    , layerStep = \frame inbox model0 ->
-        let (model1, intents) = intentLayerStep intentDef frame inbox model0
-        in (model1, concatMap (cmdEffectToList . interpret (frameRoute frame)) intents)
-    , layerExit = \routeId model0 ->
-        let (model1, intents) = intentLayerExit intentDef routeId model0
-        in (model1, concatMap (cmdEffectToList . interpret routeId) intents)
-    }
+instance Awaitable (P.ProgramM c msg) (Sticky msg a) a where
+  await (Sticky s) = P.await s
 
-data Plugin model route msg = Plugin
-  { pluginEnter :: route -> model -> (model, [Cmd route msg])
-  , pluginStep :: Frame route -> [msg] -> model -> (model, [Cmd route msg])
-  , pluginExit :: route -> model -> (model, [Cmd route msg])
-  }
+instance Awaitable (P.ProgramM c msg) (Pass c msg a) a where
+  await = P.await
 
-data PluginHooks model route msg = PluginHooks
-  { onPluginEnter :: route -> model -> (model, [Cmd route msg])
-  , onPluginExit :: route -> model -> (model, [Cmd route msg])
-  }
+instance Awaitable (P.EntityM c msg) (Wait 'LocalScope c msg a) a where
+  await waitOn =
+    case waitOn of
+      WaitEvent p -> P.await p
+      WaitDone h -> P.await h
+      WaitSticky (Sticky s) -> P.await s
 
-noPluginHooks :: PluginHooks model route msg
-noPluginHooks =
-  PluginHooks
-    { onPluginEnter = \_ mdl -> (mdl, [])
-    , onPluginExit = \_ mdl -> (mdl, [])
-    }
+instance Awaitable (P.EntityM c msg) (Handle a) a where
+  await = P.await
 
-plugin ::
-  (Frame route -> [msg] -> model -> (model, [Cmd route msg])) ->
-  Plugin model route msg
-plugin = pluginWith noPluginHooks
+instance Awaitable (P.EntityM c msg) (msg -> Bool) (Events msg) where
+  await = P.await
 
-pluginWith ::
-  PluginHooks model route msg ->
-  (Frame route -> [msg] -> model -> (model, [Cmd route msg])) ->
-  Plugin model route msg
-pluginWith hooks stepFn =
-  Plugin
-    { pluginEnter = onPluginEnter hooks
-    , pluginStep = stepFn
-    , pluginExit = onPluginExit hooks
-    }
+instance Awaitable (P.EntityM c msg) (Sticky msg a) a where
+  await (Sticky s) = P.await s
 
-data Game route model msg = Game
-  { gameInitialRoute :: !route
-  , gameInitialModel :: !model
-  , gameLayerFor :: route -> Layer model route msg
-  , gamePlugins :: [Plugin model route msg]
-  }
+query :: forall a c. E.Queryable c a => Query c a
+query = E.query
 
-game ::
-  route ->
-  model ->
-  (route -> Layer model route msg) ->
-  Game route model msg
-game initialRoute initialModel layerFor =
-  gameWith [] initialRoute initialModel layerFor
+collect :: forall c msg a. Query c a -> Pass c msg [(E.Entity, a)]
+collect = P.collect
 
-gameWith ::
-  [Plugin model route msg] ->
-  route ->
-  model ->
-  (route -> Layer model route msg) ->
-  Game route model msg
-gameWith plugins initialRoute initialModel layerFor =
-  Game
-    { gameInitialRoute = initialRoute
-    , gameInitialModel = initialModel
-    , gameLayerFor = layerFor
-    , gamePlugins = plugins
-    }
+each :: forall a c msg. E.Queryable c a => (a -> EntityPatch c) -> Pass c msg ()
+each = P.each
 
-intentGame ::
-  route ->
-  model ->
-  (route -> IntentLayer model route msg intent) ->
-  (route -> intent -> CmdEffect route msg) ->
-  Game route model msg
-intentGame initialRoute initialModel intentLayerFor interpret =
-  intentGameWith [] initialRoute initialModel intentLayerFor interpret
+for :: forall c msg a. Query c a -> (a -> EntityPatch c) -> Pass c msg ()
+for = P.eachQ
 
-intentGameWith ::
-  [Plugin model route msg] ->
-  route ->
-  model ->
-  (route -> IntentLayer model route msg intent) ->
-  (route -> intent -> CmdEffect route msg) ->
-  Game route model msg
-intentGameWith plugins initialRoute initialModel intentLayerFor interpret =
-  gameWith plugins initialRoute initialModel (\routeId -> interpretIntentLayer interpret (intentLayerFor routeId))
+eachM ::
+  forall a c msg.
+  (HasCallStack, Typeable a, E.Queryable c a) =>
+  (a -> Local c msg ()) ->
+  Pass c msg ()
+eachM = P.eachM
 
-withPlugin ::
-  Plugin model route msg ->
-  Game route model msg ->
-  Game route model msg
-withPlugin p gameDef =
-  gameDef
-    { gamePlugins = gamePlugins gameDef <> [p]
-    }
+spawnEach ::
+  forall a c msg.
+  (HasCallStack, Typeable a) =>
+  Query c a ->
+  (a -> Local c msg ()) ->
+  Pass c msg ()
+spawnEach = P.eachMQ
 
-withPlugins ::
-  [Plugin model route msg] ->
-  Game route model msg ->
-  Game route model msg
-withPlugins ps gameDef =
-  gameDef
-    { gamePlugins = gamePlugins gameDef <> ps
-    }
+send :: P.MonadProgram c msg m => Events msg -> m ()
+send = P.send
 
-data Runtime route model msg = Runtime
-  { rtHistory :: !(Scene.History route)
-  , rtModel :: !model
-  , rtPrevPath :: ![route]
-  , rtRunning :: !Bool
-  , rtGame :: !(Game route model msg)
-  }
+dt :: P.MonadProgram c msg m => m DTime
+dt = P.dt
 
-start :: Game route model msg -> Runtime route model msg
-start g =
-  Runtime
-    { rtHistory = Scene.historyAt (Scene.path [gameInitialRoute g])
-    , rtModel = gameInitialModel g
-    , rtPrevPath = []
-    , rtRunning = True
-    , rtGame = g
-    }
+time :: P.MonadProgram c msg m => m F.Time
+time = P.time
 
-current :: Runtime route model msg -> route
-current runtime =
-  case reverse (currentPath runtime) of
-    top : _ -> top
-    [] -> gameInitialRoute (rtGame runtime)
-
-currentPath :: Runtime route model msg -> [route]
-currentPath = Scene.locationSegments . Scene.current . rtHistory
-
-model :: Runtime route model msg -> model
-model = rtModel
-
-canGoBack :: Runtime route model msg -> Bool
-canGoBack = Scene.canGoBack . rtHistory
-
-canGoForward :: Runtime route model msg -> Bool
-canGoForward = Scene.canGoForward . rtHistory
-
-isRunning :: Runtime route model msg -> Bool
-isRunning = rtRunning
+sample :: P.MonadProgram c msg m => F.Tween a -> m a
+sample = P.sample
 
 step ::
-  Eq route =>
-  DTime ->
-  [msg] ->
-  Runtime route model msg ->
-  (Runtime route model msg, [msg])
-step dt inbox runtime0 =
-  if not (rtRunning runtime0)
-    then (runtime0, [])
-    else
-      let pathNow = currentPath runtime0
-          topNow = lastMaybe pathNow
-          topPrev = lastMaybe (rtPrevPath runtime0)
-          entered = [routeId | routeId <- pathNow, routeId `notElem` rtPrevPath runtime0]
-          exited = [routeId | routeId <- rtPrevPath runtime0, routeId `notElem` pathNow]
-          exitedInOrder = reverse [routeId | routeId <- rtPrevPath runtime0, routeId `elem` exited]
-          layerFor = gameLayerFor (rtGame runtime0)
-          plugins = gamePlugins (rtGame runtime0)
-          (modelAfterExit, cmdExit) =
-            foldl'
-              (\(mdl, cmds) routeId ->
-                let layerDef = layerFor routeId
-                    (mdl1, cmds1) = layerExit layerDef routeId mdl
-                    (mdl2, cmds2) = runPluginExit plugins routeId mdl1
-                in (mdl2, cmds <> cmds1 <> cmds2)
-              )
-              (rtModel runtime0, [])
-              exitedInOrder
-          (modelAfterEnter, cmdEnter) =
-            foldl'
-              (\(mdl, cmds) routeId ->
-                if routeId `elem` entered
-                  then
-                    let layerDef = layerFor routeId
-                        (mdl1, cmds1) = layerEnter layerDef routeId mdl
-                        (mdl2, cmds2) = runPluginEnter plugins routeId mdl1
-                    in (mdl2, cmds <> cmds1 <> cmds2)
-                  else (mdl, cmds)
-              )
-              (modelAfterExit, [])
-              pathNow
-          (modelAfterFrame, cmdFrame) =
-            foldl'
-              (\(mdl, cmds) routeId ->
-                let frame =
-                      Frame
-                        { frameDt = dt
-                        , frameRoute = routeId
-                        , framePath = pathNow
-                        , frameEvents = routeEventsFor routeId entered exited topPrev topNow
-                        , frameCanGoBack = Scene.canGoBack (rtHistory runtime0)
-                        , frameCanGoForward = Scene.canGoForward (rtHistory runtime0)
-                        }
-                    layerDef = layerFor routeId
-                    (mdl1, cmds1) = layerStep layerDef frame inbox mdl
-                    (mdl2, cmds2) = runPluginStep plugins frame inbox mdl1
-                in (mdl2, cmds <> cmds1 <> cmds2)
-              )
-              (modelAfterEnter, [])
-              pathNow
-          (history1, running1, outMsgs) =
-            applyCommands (rtHistory runtime0) True (cmdExit <> cmdEnter <> cmdFrame)
-          runtime1 =
-            runtime0
-              { rtHistory = history1
-              , rtModel = modelAfterFrame
-              , rtPrevPath = pathNow
-              , rtRunning = running1
-              }
-      in (runtime1, outMsgs)
+  (HasCallStack, P.MonadProgram c msg m, Typeable a, Typeable b) =>
+  F.Step a b ->
+  a ->
+  m b
+step = P.step
 
-applyCommands ::
-  Eq route =>
-  Scene.History route ->
-  Bool ->
-  [Cmd route msg] ->
-  (Scene.History route, Bool, [msg])
-applyCommands history0 running0 cmds =
-  foldl' stepOne (history0, running0, []) cmds
-  where
-    stepOne state@(historyNow, runningNow, outMsgs) command
-      | not runningNow = state
-      | otherwise =
-          case command of
-            Emit msg ->
-              (historyNow, runningNow, outMsgs <> [msg])
-            Navigate nav ->
-              (applyNav nav historyNow, runningNow, outMsgs)
-            Quit ->
-              (historyNow, False, outMsgs)
+world :: Patch c -> Routine c msg ()
+world = P.world
 
-runPluginEnter ::
-  [Plugin model route msg] ->
-  route ->
-  model ->
-  (model, [Cmd route msg])
-runPluginEnter plugins routeId mdl0 =
-  foldl'
-    (\(mdl, cmds) one ->
-      let (mdl1, cmds1) = pluginEnter one routeId mdl
-      in (mdl1, cmds <> cmds1)
-    )
-    (mdl0, [])
-    plugins
+edit :: EntityPatch c -> Local c msg ()
+edit = P.edit
 
-runPluginStep ::
-  [Plugin model route msg] ->
-  Frame route ->
-  [msg] ->
-  model ->
-  (model, [Cmd route msg])
-runPluginStep plugins frame inbox mdl0 =
-  foldl'
-    (\(mdl, cmds) one ->
-      let (mdl1, cmds1) = pluginStep one frame inbox mdl
-      in (mdl1, cmds <> cmds1)
-    )
-    (mdl0, [])
-    plugins
+patch :: (E.World c -> E.World c) -> Patch c
+patch = P.patch
 
-runPluginExit ::
-  [Plugin model route msg] ->
-  route ->
-  model ->
-  (model, [Cmd route msg])
-runPluginExit plugins routeId mdl0 =
-  foldl'
-    (\(mdl, cmds) one ->
-      let (mdl1, cmds1) = pluginExit one routeId mdl
-      in (mdl1, cmds <> cmds1)
-    )
-    (mdl0, [])
-    plugins
+emptyPatch :: Patch c
+emptyPatch = P.emptyPatch
 
-applyNav :: Eq route => Nav route -> Scene.History route -> Scene.History route
-applyNav nav historyNow =
-  case nav of
-    Push routeId ->
-      let pathNow = Scene.locationSegments (Scene.current historyNow)
-      in Scene.gotoAt Scene.Push (Scene.path (pathNow <> [routeId])) historyNow
-    Replace routeId ->
-      let pathNow = Scene.locationSegments (Scene.current historyNow)
-          prefix = if null pathNow then [] else init pathNow
-      in Scene.gotoAt Scene.Replace (Scene.path (prefix <> [routeId])) historyNow
-    Back ->
-      Scene.back historyNow
-    Forward ->
-      Scene.forward historyNow
+drive :: forall a c. (E.Component c a, E.ComponentBit c a) => E.Entity -> F.Step () a -> Patch c
+drive = P.drive
 
-routeEventsFor ::
-  Eq route =>
-  route ->
-  [route] ->
-  [route] ->
-  Maybe route ->
-  Maybe route ->
-  [RouteEvent]
-routeEventsFor routeId entered exited topPrev topNow =
-  enterEvt <> exitEvt <> topEvt
-  where
-    enterEvt =
-      if routeId `elem` entered
-        then [Entered]
-        else []
-    exitEvt =
-      if routeId `elem` exited
-        then [Exited]
-        else []
-    topEvt =
-      becameTop <> leftTop
-    becameTop =
-      if topNow == Just routeId && topPrev /= Just routeId
-        then [BecameTop]
-        else []
-    leftTop =
-      if topPrev == Just routeId && topNow /= Just routeId
-        then [LeftTop]
-        else []
+set :: forall a c. (E.Component c a, E.ComponentBit c a) => a -> EntityPatch c
+set = P.set
 
-lastMaybe :: [a] -> Maybe a
-lastMaybe xs =
-  case reverse xs of
-    [] -> Nothing
-    y : _ -> Just y
+update :: forall a c. (E.Component c a, E.ComponentBit c a) => (a -> a) -> EntityPatch c
+update = P.update
 
-cmdEffectToList :: CmdEffect route msg -> [Cmd route msg]
-cmdEffectToList effect =
-  case effect of
-    Ignore -> []
-    One cmd -> [cmd]
-    Many cmds -> cmds
+del :: forall a c. (E.Component c a, E.ComponentBit c a) => EntityPatch c
+del = P.del @a
 
-{-# DEPRECATED layerFromInbox "Prefer IntentLayer + intentGame and interpret intents via CmdEffect." #-}
-{-# DEPRECATED layerFromInboxAt "Prefer IntentLayer + intentGame and interpret intents via CmdEffect." #-}
+at :: E.Entity -> EntityPatch c -> Patch c
+at = P.at
+
+put :: Typeable a => a -> Patch c
+put = P.put
+
+relate :: forall (r :: Type) c. Typeable r => E.Entity -> E.Entity -> Patch c
+relate = P.relate @r
+
+unrelate :: forall (r :: Type) c. Typeable r => E.Entity -> E.Entity -> Patch c
+unrelate = P.unrelate @r

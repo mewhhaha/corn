@@ -6,28 +6,28 @@
 {-# LANGUAGE TypeApplications #-}
 
 module SceneProps
-  ( scene_push_pop_roundtrip
-  , scene_nested_path_focus
-  , scene_replace_primary_stack
-  , scene_history_push_pop_segments
-  , scene_history_back_forward
-  , scene_history_back_clears_forward_on_new_nav
-  , scene_history_pathwith_params
-  , scene_route_simple_dsl
-  , scene_route_specificity_prefers_literal
-  , scene_route_simple_typed_goto
-  , scene_route_simple_back_forward
-  , scene_route_simple_search_keys_strict
-  , scene_route_simple_rejects_duplicate_leaves
-  , scene_route_runtime_step_events
-  , scene_route_runtime_rejects_duplicate_patterns
-  , scene_route_runtime_rejects_duplicate_leaves
-  , scene_corn_simple_navigation_loop
-  , scene_corn_deferred_navigation_snapshot
-  , scene_corn_quit_is_terminal
-  , scene_corn_plugin_step_runs
-  , scene_corn_layer_from_inbox_helper
-  , scene_corn_intent_game_centralizes_navigation
+  ( scenePushPopRoundtrip
+  , sceneNestedPathFocus
+  , sceneReplacePrimaryStack
+  , sceneHistoryPushPopSegments
+  , sceneHistoryBackForward
+  , sceneHistoryBackClearsForwardOnNewNav
+  , sceneHistoryPathwithParams
+  , sceneRouteSimpleDsl
+  , sceneRouteSpecificityPrefersLiteral
+  , sceneRouteSimpleTypedGoto
+  , sceneRouteSimpleBackForward
+  , sceneRouteSimpleSearchKeysStrict
+  , sceneRouteSimpleRejectsDuplicateLeaves
+  , sceneRouteRuntimeStepEvents
+  , sceneRouteRuntimeRejectsDuplicatePatterns
+  , sceneRouteRuntimeRejectsDuplicateLeaves
+  , sceneCornSimpleNavigationLoop
+  , sceneCornDeferredNavigationSnapshot
+  , sceneCornQuitIsTerminal
+  , sceneCornPluginStepRuns
+  , sceneCornLayerFromInboxHelper
+  , sceneCornIntentGameCentralizesNavigation
   ) where
 
 import Prelude
@@ -59,31 +59,31 @@ data RuntimeMsg = RuntimeMsg
 segmentsOf :: Scene.History Sid -> [Sid]
 segmentsOf = Scene.locationSegments . Scene.current
 
-scene_push_pop_roundtrip :: Bool
-scene_push_pop_roundtrip =
+scenePushPopRoundtrip :: Bool
+scenePushPopRoundtrip =
   let s0 = Scene.singletonStack MainMenu
       s1 = Scene.push Options s0
   in case Scene.pop s1 of
       Just (popped, rest) -> popped == Options && rest == s0
       Nothing -> False
 
-scene_nested_path_focus :: Bool
-scene_nested_path_focus =
+sceneNestedPathFocus :: Bool
+sceneNestedPathFocus =
   let h0 = Scene.historyFrom [MainMenu]
       h1 = Scene.gotoSegment Scene.Push Options h0
       h2 = Scene.back h1
   in segmentsOf h1 == [Options]
       && segmentsOf h2 == [MainMenu]
 
-scene_replace_primary_stack :: Bool
-scene_replace_primary_stack =
+sceneReplacePrimaryStack :: Bool
+sceneReplacePrimaryStack =
   let h0 = Scene.historyFrom [MainMenu]
       h1 = Scene.gotoSegment Scene.Replace Game h0
   in segmentsOf h1 == [Game]
       && not (Scene.canGoBack h1)
 
-scene_history_push_pop_segments :: Bool
-scene_history_push_pop_segments =
+sceneHistoryPushPopSegments :: Bool
+sceneHistoryPushPopSegments =
   let h0 = Scene.historyFrom [MainMenu]
       h1 = Scene.gotoSegment Scene.Push Options h0
       h2 = Scene.back h1
@@ -91,8 +91,8 @@ scene_history_push_pop_segments =
       && segmentsOf h2 == [MainMenu]
       && not (Scene.canGoBack h2)
 
-scene_history_back_forward :: Bool
-scene_history_back_forward =
+sceneHistoryBackForward :: Bool
+sceneHistoryBackForward =
   let h0 = Scene.historyFrom [Root]
       h1 = Scene.gotoSegment Scene.Push MainMenu h0
       h2 = Scene.gotoSegment Scene.Push Game h1
@@ -103,8 +103,8 @@ scene_history_back_forward =
       && Scene.canGoBack h4
       && not (Scene.canGoForward h4)
 
-scene_history_back_clears_forward_on_new_nav :: Bool
-scene_history_back_clears_forward_on_new_nav =
+sceneHistoryBackClearsForwardOnNewNav :: Bool
+sceneHistoryBackClearsForwardOnNewNav =
   let h0 = Scene.historyFrom [Root]
       h1 = Scene.gotoSegment Scene.Push MainMenu h0
       h2 = Scene.gotoSegment Scene.Push Game h1
@@ -113,8 +113,8 @@ scene_history_back_clears_forward_on_new_nav =
   in segmentsOf h4 == [Credits]
       && not (Scene.canGoForward h4)
 
-scene_history_pathwith_params :: Bool
-scene_history_pathwith_params =
+sceneHistoryPathwithParams :: Bool
+sceneHistoryPathwithParams =
   let loc =
         Scene.withUrlParam "id" "enemy-42" $
           Scene.withSearchParam "tab" ["stats", "loot"] $
@@ -152,8 +152,8 @@ simpleRoutes =
   Route.leaf simpleRoute
     Route.:> Route.EmptyRoutes
 
-scene_route_simple_dsl :: Bool
-scene_route_simple_dsl =
+sceneRouteSimpleDsl :: Bool
+sceneRouteSimpleDsl =
   case Route.create simpleRoutes "/hello/world/42" of
     Left _ -> False
     Right rt0 ->
@@ -184,8 +184,8 @@ specificityRoutes =
       Route.:>
       Route.EmptyRoutes
 
-scene_route_specificity_prefers_literal :: Bool
-scene_route_specificity_prefers_literal =
+sceneRouteSpecificityPrefersLiteral :: Bool
+sceneRouteSpecificityPrefersLiteral =
   case Route.create specificityRoutes "/a/b/c" of
     Left _ -> False
     Right rt0 ->
@@ -228,8 +228,8 @@ flatRoutes =
     Route.:> Route.leaf optionsRoute
     Route.:> Route.EmptyRoutes
 
-scene_route_simple_typed_goto :: Bool
-scene_route_simple_typed_goto =
+sceneRouteSimpleTypedGoto :: Bool
+sceneRouteSimpleTypedGoto =
   case (Route.create nestedRoutes "/main-menu", Route.create flatRoutes "/main-menu/options") of
     (Right nestedRt0, Right flatRt0) ->
       let nestedRt1 = Route.navigate (Route.Push "/main-menu/options") nestedRt0
@@ -239,8 +239,8 @@ scene_route_simple_typed_goto =
           && flatSegments == ["/main-menu/options"]
     _ -> False
 
-scene_route_simple_back_forward :: Bool
-scene_route_simple_back_forward =
+sceneRouteSimpleBackForward :: Bool
+sceneRouteSimpleBackForward =
   case Route.create nestedRoutes "/main-menu" of
     Left _ -> False
     Right rt0 ->
@@ -252,8 +252,8 @@ scene_route_simple_back_forward =
           && Route.canGoBack rt3
           && not (Route.canGoForward rt3)
 
-scene_route_simple_search_keys_strict :: Bool
-scene_route_simple_search_keys_strict =
+sceneRouteSimpleSearchKeysStrict :: Bool
+sceneRouteSimpleSearchKeysStrict =
   case Route.create simpleRoutes "/hello/world/42" of
     Left _ -> False
     Right rt0 ->
@@ -274,8 +274,8 @@ duplicateSimpleRoutes =
       Route.:>
       Route.EmptyRoutes
 
-scene_route_simple_rejects_duplicate_leaves :: Bool
-scene_route_simple_rejects_duplicate_leaves =
+sceneRouteSimpleRejectsDuplicateLeaves :: Bool
+sceneRouteSimpleRejectsDuplicateLeaves =
   case Route.create duplicateSimpleRoutes "/players/1" of
     Left _ -> True
     Right _ -> False
@@ -308,8 +308,8 @@ runtimeRoutes =
     )
     Route.:> Route.EmptyRoutes
 
-scene_route_runtime_step_events :: Bool
-scene_route_runtime_step_events =
+sceneRouteRuntimeStepEvents :: Bool
+sceneRouteRuntimeStepEvents =
   case Route.create runtimeRoutes "/main-menu" of
     Left _ -> False
     Right rt0 ->
@@ -342,8 +342,8 @@ duplicatePatternRoutes =
       Route.:>
       Route.EmptyRoutes
 
-scene_route_runtime_rejects_duplicate_patterns :: Bool
-scene_route_runtime_rejects_duplicate_patterns =
+sceneRouteRuntimeRejectsDuplicatePatterns :: Bool
+sceneRouteRuntimeRejectsDuplicatePatterns =
   case Route.create duplicatePatternRoutes "/dup" of
     Left _ -> True
     Right _ -> False
@@ -356,8 +356,8 @@ duplicateLeafRoutes =
       Route.:>
       Route.EmptyRoutes
 
-scene_route_runtime_rejects_duplicate_leaves :: Bool
-scene_route_runtime_rejects_duplicate_leaves =
+sceneRouteRuntimeRejectsDuplicateLeaves :: Bool
+sceneRouteRuntimeRejectsDuplicateLeaves =
   case Route.create duplicateLeafRoutes "/players/1" of
     Left _ -> True
     Right _ -> False
@@ -414,8 +414,8 @@ cornSceneFor routeId =
             cmds = [Corn.Navigate Corn.Back | CornBack `elem` inbox]
         in (model1, cmds)
 
-scene_corn_simple_navigation_loop :: Bool
-scene_corn_simple_navigation_loop =
+sceneCornSimpleNavigationLoop :: Bool
+sceneCornSimpleNavigationLoop =
   let gameDef =
         Corn.game
           CornMenu
@@ -427,10 +427,10 @@ scene_corn_simple_navigation_loop =
       (rt3, out3) = Corn.step 0.016 [CornStart] rt2
       (rt4, out4) = Corn.step 0.016 [CornBack] rt3
       model4 = Corn.model rt4
-  in out1 == []
-      && out2 == []
-      && out3 == []
-      && out4 == []
+  in null out1
+      && null out2
+      && null out3
+      && null out4
       && map Corn.encodeRoute (Corn.currentPath rt1) == ["/main-menu", "/main-menu/options"]
       && map Corn.encodeRoute (Corn.currentPath rt2) == ["/main-menu"]
       && map Corn.encodeRoute (Corn.currentPath rt3) == ["/main-menu", "/game"]
@@ -465,8 +465,8 @@ deferSceneFor routeId =
         let model1 = model0 {deferOptionsTicks = deferOptionsTicks model0 + 1}
         in (model1, [])
 
-scene_corn_deferred_navigation_snapshot :: Bool
-scene_corn_deferred_navigation_snapshot =
+sceneCornDeferredNavigationSnapshot :: Bool
+sceneCornDeferredNavigationSnapshot =
   let gameDef =
         Corn.game
           DeferMenu
@@ -477,8 +477,8 @@ scene_corn_deferred_navigation_snapshot =
       (rt2, out2) = Corn.step 0.016 [] rt1
       m1 = Corn.model rt1
       m2 = Corn.model rt2
-  in out1 == []
-      && out2 == []
+  in null out1
+      && null out2
       && Corn.currentPath rt1 == [DeferMenu, DeferOptions]
       && deferMenuTicks m1 == 1
       && deferOptionsTicks m1 == 0
@@ -515,8 +515,8 @@ quitSceneFor routeId =
         let model1 = model0 {quitOtherTicks = quitOtherTicks model0 + 1}
         in (model1, [])
 
-scene_corn_quit_is_terminal :: Bool
-scene_corn_quit_is_terminal =
+sceneCornQuitIsTerminal :: Bool
+sceneCornQuitIsTerminal =
   let gameDef =
         Corn.game
           QuitMenu
@@ -527,8 +527,8 @@ scene_corn_quit_is_terminal =
       (rt2, out2) = Corn.step 0.016 [] rt1
       m1 = Corn.model rt1
       m2 = Corn.model rt2
-  in out1 == []
-      && out2 == []
+  in null out1
+      && null out2
       && not (Corn.isRunning rt1)
       && not (Corn.isRunning rt2)
       && Corn.currentPath rt1 == [QuitMenu]
@@ -557,8 +557,8 @@ pluginCounter =
     let model1 = model0 {pluginStepTicks = pluginStepTicks model0 + 1}
     in (model1, [])
 
-scene_corn_plugin_step_runs :: Bool
-scene_corn_plugin_step_runs =
+sceneCornPluginStepRuns :: Bool
+sceneCornPluginStepRuns =
   let gameDef =
         Corn.withPlugin pluginCounter $
           Corn.game
@@ -569,8 +569,8 @@ scene_corn_plugin_step_runs =
       (rt1, out1) = Corn.step 0.016 [] rt0
       (rt2, out2) = Corn.step 0.016 [] rt1
       m2 = Corn.model rt2
-  in out1 == []
-      && out2 == []
+  in null out1
+      && null out2
       && pluginSceneTicks m2 == 2
       && pluginStepTicks m2 == 2
 
@@ -602,14 +602,14 @@ helperCommand routeId msg =
 helperLayerFor :: CornHelperRoute -> Corn.Layer () CornHelperRoute CornHelperMsg
 helperLayerFor = Corn.layerFromInboxAt helperCommand
 
-scene_corn_layer_from_inbox_helper :: Bool
-scene_corn_layer_from_inbox_helper =
+sceneCornLayerFromInboxHelper :: Bool
+sceneCornLayerFromInboxHelper =
   let gameDef = Corn.game HelperMenu () helperLayerFor
       rt0 = Corn.start gameDef
       (rt1, out1) = Corn.step 0.016 [HelperStart] rt0
       (rt2, out2) = Corn.step 0.016 [HelperBack] rt1
-  in out1 == []
-      && out2 == []
+  in null out1
+      && null out2
       && Corn.currentPath rt1 == [HelperMenu, HelperGame]
       && Corn.currentPath rt2 == [HelperMenu]
 
@@ -659,16 +659,16 @@ interpretIntent routeId intent =
     (_, QuitIntent) -> Corn.One Corn.Quit
     _ -> Corn.Ignore
 
-scene_corn_intent_game_centralizes_navigation :: Bool
-scene_corn_intent_game_centralizes_navigation =
+sceneCornIntentGameCentralizesNavigation :: Bool
+sceneCornIntentGameCentralizesNavigation =
   let gameDef = Corn.intentGame IntentMenu () intentLayerFor interpretIntent
       rt0 = Corn.start gameDef
       (rt1, out1) = Corn.step 0.016 [IntentStart] rt0
       (rt2, out2) = Corn.step 0.016 [IntentBack] rt1
       (rt3, out3) = Corn.step 0.016 [IntentQuit] rt2
-  in out1 == []
-      && out2 == []
-      && out3 == []
+  in null out1
+      && null out2
+      && null out3
       && Corn.currentPath rt1 == [IntentMenu, IntentGame]
       && Corn.currentPath rt2 == [IntentMenu]
       && not (Corn.isRunning rt3)

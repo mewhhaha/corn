@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -27,7 +26,7 @@ module ECSProps
 
 import Control.Applicative ((<|>))
 import Data.Bits (bit, complement, (.&.))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import qualified Engine.Data.ECS as E
 import GHC.Generics (Generic)
 import qualified Engine.Data.Transform as T
@@ -224,9 +223,9 @@ prop_run_query_sig_gate x b =
             sigNoInt = sig .&. complement (bit (E.componentBitOf @C @Int))
             sigNoBool = sig .&. complement (bit (E.componentBitOf @C @Bool))
         in E.runQuerySig qInt sig e bag == Just x
-            && E.runQuerySig qInt sigNoInt e bag == Nothing
+            && isNothing (E.runQuerySig qInt sigNoInt e bag)
             && E.runQuerySig qPair sig e bag == Just (x, b)
-            && E.runQuerySig qPair sigNoBool e bag == Nothing
+            && isNothing (E.runQuerySig qPair sigNoBool e bag)
       [] -> False
 
 data Owns

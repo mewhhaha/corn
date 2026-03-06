@@ -2,24 +2,24 @@
 {-# LANGUAGE TypeApplications #-}
 
 module ProgramProps
-  ( program_resume_once
-  , program_await_value
-  , program_eachm_entity_state
-  , program_eachm_enemy_state_machine
-  , program_eachm_independent_loops
-  , program_step_independent_callsites
-  , program_drive_del_stops
-  , program_each_tuple_query
-  , program_parallel_kernel_equivalence
-  , program_compute_fused_order
-  , program_collect_fused_order
-  , program_event_chain
-  , program_await_sticky_same_frame
-  , program_await_sticky_across_frames
-  , program_await_sticky_first_match
-  , program_await_sticky_inline_applicative
-  , program_replay_from_inputs
-  , program_snapshot_roundtrip
+  ( programResumeStickySameFrame
+  , programResumeStickyAcrossFrames
+  , programResumeStickyFirstMatch
+  , programResumeStickyInlineApplicative
+  , programResumeOnce
+  , programAwaitValue
+  , programParallelKernelEquivalence
+  , programEachmEnemyStateMachine
+  , programEachmEntityState
+  , programEachmIndependentLoops
+  , programStepIndependentCallsites
+  , programDriveDelStops
+  , programEachTupleQuery
+  , programComputeFusedOrder
+  , programCollectFusedOrder
+  , programEventChain
+  , programReplayFromInputs
+  , programSnapshotRoundtrip
   , prop_program_resume
   , prop_program_await_value
   , prop_program_replay_from_inputs
@@ -30,6 +30,8 @@ module ProgramProps
   ) where
 
 import Control.Exception (bracket)
+import Data.Bifunctor (first)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.List (foldl', sortOn)
 import GHC.Generics (Generic)
 import GHC.Conc (getNumCapabilities, setNumCapabilities)
@@ -112,7 +114,7 @@ runPatch p w0 =
 
 countsCompute :: S.Batch C (Int, Int) (Int, Int)
 countsCompute =
-  (,) <$> (length . map snd <$> S.collect qMarker)
+  ((,) . length . map snd <$> S.collect qMarker)
       <*> (S.each @Int (const (S.set Marker)) *> fmap length (S.collect qMarker))
 
 runCollectGraph :: World -> (World, S.Events (Int, Int), Graph (Int, Int))
@@ -141,8 +143,8 @@ pickFocus msg =
 stickyUiPair :: S.Sticky UiMsg (Int, Bool)
 stickyUiPair = (,) <$> S.sticky pickHover <*> S.sticky pickFocus
 
-program_await_sticky_same_frame :: Bool
-program_await_sticky_same_frame =
+programResumeStickySameFrame :: Bool
+programResumeStickySameFrame =
   let prog :: ProgramM UiMsg ()
       prog = do
         pair <- S.await stickyUiPair
@@ -155,8 +157,8 @@ program_await_sticky_same_frame =
       (w1, _, _) = S.run 0.1 (E.emptyWorld :: World) [Noise, Hover 3, Focus True] g0
   in E.getr @(Int, Bool) w1 == Just (3, True)
 
-program_await_sticky_across_frames :: Bool
-program_await_sticky_across_frames =
+programResumeStickyAcrossFrames :: Bool
+programResumeStickyAcrossFrames =
   let prog :: ProgramM UiMsg ()
       prog = do
         pair <- S.await stickyUiPair
@@ -168,11 +170,11 @@ program_await_sticky_across_frames =
           pure ()
       (w1, _, g1) = S.run 0.1 (E.emptyWorld :: World) [Hover 9] g0
       (w2, _, _) = S.run 0.1 w1 [Noise, Focus False] g1
-  in E.getr @(Int, Bool) w1 == Nothing
+  in isNothing (E.getr @(Int, Bool) w1)
       && E.getr @(Int, Bool) w2 == Just (9, False)
 
-program_await_sticky_first_match :: Bool
-program_await_sticky_first_match =
+programResumeStickyFirstMatch :: Bool
+programResumeStickyFirstMatch =
   let prog :: ProgramM UiMsg ()
       prog = do
         pair <- S.await stickyUiPair
@@ -185,8 +187,8 @@ program_await_sticky_first_match =
       (w1, _, _) = S.run 0.1 (E.emptyWorld :: World) [Hover 1, Hover 2, Focus True] g0
   in E.getr @(Int, Bool) w1 == Just (1, True)
 
-program_await_sticky_inline_applicative :: Bool
-program_await_sticky_inline_applicative =
+programResumeStickyInlineApplicative :: Bool
+programResumeStickyInlineApplicative =
   let prog :: ProgramM UiMsg ()
       prog = do
         score <- S.await $
@@ -201,11 +203,11 @@ program_await_sticky_inline_applicative =
           pure ()
       (w1, _, g1) = S.run 0.1 (E.emptyWorld :: World) [Hover 4, Noise] g0
       (w2, _, _) = S.run 0.1 w1 [Focus False] g1
-  in E.getr @Int w1 == Nothing
+  in isNothing (E.getr @Int w1)
       && E.getr @Int w2 == Just 40
 
-program_resume_once :: Bool
-program_resume_once =
+programResumeOnce :: Bool
+programResumeOnce =
   let (e, w0) = E.spawn (0 :: Int) (E.emptyWorld :: World)
       sys :: ProgramM String ()
       sys = do
@@ -231,8 +233,8 @@ program_resume_once =
       && E.get @Int e w3 == Just 11
       && E.get @Int e w4 == Just 12
 
-program_await_value :: Bool
-program_await_value =
+programAwaitValue :: Bool
+programAwaitValue =
   let (e, w0) = E.spawn (0 :: Int) (E.emptyWorld :: World)
       g0 :: Graph String
       g0 =
@@ -334,16 +336,16 @@ runParallelProbe caps =
         (w1, _, _) = S.run 0.1 w0 [] g0
     pure (E.runq (E.query @ProbeRow) w1)
 
-program_parallel_kernel_equivalence :: Bool
-program_parallel_kernel_equivalence =
+programParallelKernelEquivalence :: Bool
+programParallelKernelEquivalence =
   unsafePerformIO $ do
     seqRows <- runParallelProbe 1
     parRows <- runParallelProbe 2
     pure (seqRows == parRows)
-{-# NOINLINE program_parallel_kernel_equivalence #-}
+{-# NOINLINE programParallelKernelEquivalence #-}
 
-program_eachm_enemy_state_machine :: Bool
-program_eachm_enemy_state_machine =
+programEachmEnemyStateMachine :: Bool
+programEachmEnemyStateMachine =
   let (e1, w0) = E.spawn (EnemyTag, Idle) (E.emptyWorld :: World)
       g0 :: Graph ()
       g0 =
@@ -367,8 +369,8 @@ program_eachm_enemy_state_machine =
       && E.get @EnemyAI e2 w8 == Just Idle
       && E.get @EnemyAI e2 w9 == Just Windup
 
-program_eachm_entity_state :: Bool
-program_eachm_entity_state =
+programEachmEntityState :: Bool
+programEachmEntityState =
   let (e1, w1) = E.spawn (Count 0) (E.emptyWorld :: World)
       (e2, w2) = E.spawn (Count 0) w1
       g0 :: Graph ()
@@ -383,8 +385,8 @@ program_eachm_entity_state =
       && E.get @Count e1 w4 == Just (Count 2)
       && E.get @Count e2 w4 == Just (Count 2)
 
-program_eachm_independent_loops :: Bool
-program_eachm_independent_loops =
+programEachmIndependentLoops :: Bool
+programEachmIndependentLoops =
   let (e, w0) = E.spawn (Count 0) (E.emptyWorld :: World)
       prog :: ProgramM () ()
       prog = do
@@ -410,8 +412,8 @@ program_eachm_independent_loops =
       && E.get @LoopA e w2 == Just (LoopA 2)
       && E.get @LoopB e w2 == Just (LoopB 120)
 
-program_step_independent_callsites :: Bool
-program_step_independent_callsites =
+programStepIndependentCallsites :: Bool
+programStepIndependentCallsites =
   let prog :: ProgramM (Int, Int) ()
       prog = do
         a <- S.step (F.acc (0 :: Int)) [(+1)]
@@ -435,8 +437,8 @@ tickDriven = do
     S.each @() (const mempty)
   pure ()
 
-program_drive_del_stops :: Bool
-program_drive_del_stops =
+programDriveDelStops :: Bool
+programDriveDelStops =
   let (e, w0) = E.spawn () (E.emptyWorld :: World)
       w1 = runPatch (S.drive e (counterStep 0)) w0
       g0 :: Graph ()
@@ -450,13 +452,13 @@ program_drive_del_stops =
       (w5, _, _) = S.run 0.1 w4 [] g2
   in E.get @Int e w1 == Just 0
       && E.get @Int e w2 == Just 1
-      && E.get @Int e w3 == Nothing
-      && E.get @Int e w4 == Nothing
-      && E.get @Int e w5 == Nothing
+      && isNothing (E.get @Int e w3)
+      && isNothing (E.get @Int e w4)
+      && isNothing (E.get @Int e w5)
 
-program_each_tuple_query :: Bool
-program_each_tuple_query =
-  let (e, w0) = E.spawn ((3 :: Int), True) (E.emptyWorld :: World)
+programEachTupleQuery :: Bool
+programEachTupleQuery =
+  let (e, w0) = E.spawn (3 :: Int, True) (E.emptyWorld :: World)
       prog :: ProgramM () ()
       prog = do
         _ <- S.await $ batchU $ do
@@ -473,8 +475,8 @@ program_each_tuple_query =
       (w1, _, _) = S.run 0.1 w0 [] g0
   in E.get @Int e w1 == Just 4
 
-program_compute_fused_order :: Bool
-program_compute_fused_order =
+programComputeFusedOrder :: Bool
+programComputeFusedOrder =
   let (e, w0) = E.spawn (0 :: Int) (E.emptyWorld :: World)
       markProg :: ProgramM () ()
       markProg = do
@@ -507,8 +509,8 @@ prop_program_patch_assoc x =
   in E.get @Int e w1 == Just (x + 3)
       && E.get @Int e w1 == E.get @Int e w2
 
-program_collect_fused_order :: Bool
-program_collect_fused_order =
+programCollectFusedOrder :: Bool
+programCollectFusedOrder =
   let (e, w0) = E.spawn (0 :: Int) (E.emptyWorld :: World)
       (w1, out, _) = runCollectGraph w0
   in out == [(0, 1)] && E.get @Marker e w1 == Just Marker
@@ -519,8 +521,8 @@ prop_program_collect_fused x =
       (_, out, _) = runCollectGraph w0
   in out == [(0, 1)]
 
-program_event_chain :: Bool
-program_event_chain =
+programEventChain :: Bool
+programEventChain =
   let (e, w0) = E.spawn (Count 0) (E.emptyWorld :: World)
       g0 :: Graph Int
       g0 =
@@ -587,9 +589,7 @@ decodeCheckpoint raw =
 snapshotWorldInts :: World -> ReplayWorldSnap
 snapshotWorldInts w =
   let pairs =
-        map
-          (\(ent, v) -> (E.eid ent, v))
-          (E.runq (E.comp @Int) w)
+        map (first E.eid) (E.runq (E.comp @Int) w)
   in ReplayWorldSnap (sortOn fst pairs)
 
 restoreWorldInts :: ReplayWorldSnap -> Maybe World
@@ -632,15 +632,13 @@ runInputFrames :: [Bool] -> (World, Graph String) -> (World, Graph String)
 runInputFrames evs wg0 = foldl' step wg0 evs
   where
     step (w, g) ev =
-      let inbox = if ev then ["go"] else []
+      let inbox = ["go" | ev]
           (w', _, g') = S.run 0.1 w inbox g
       in (w', g')
 
 readCounter :: E.Entity -> World -> Int
 readCounter e w =
-  case E.get @Int e w of
-    Nothing -> 0
-    Just v -> v
+  fromMaybe 0 (E.get @Int e w)
 
 runFrames :: [Bool] -> Int
 runFrames evs =
@@ -648,8 +646,8 @@ runFrames evs =
       (wf, _) = runInputFrames evs (w0, g0)
   in readCounter e wf
 
-program_replay_from_inputs :: Bool
-program_replay_from_inputs =
+programReplayFromInputs :: Bool
+programReplayFromInputs =
   let evs = [False, True, False, False, True, False, True]
       splitIx = 4
       (e, w0, g0) = resumeFixture
@@ -662,8 +660,8 @@ program_replay_from_inputs =
   in readCounter e wSave == readCounter e wRebuilt
       && readCounter e wReplay == readCounter e wDirect
 
-program_snapshot_roundtrip :: Bool
-program_snapshot_roundtrip =
+programSnapshotRoundtrip :: Bool
+programSnapshotRoundtrip =
   let evs = [False, True, False, False, True, False, True]
       splitIx = 4
       prefix = take splitIx evs

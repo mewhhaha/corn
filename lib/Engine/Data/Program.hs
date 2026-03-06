@@ -28,7 +28,9 @@ module Engine.Data.Program
   , MonadProgram
   , Batch
   , each
+  , eachQ
   , eachM
+  , eachMQ
   , collect
   , GraphM
   , graph
@@ -53,6 +55,7 @@ module Engine.Data.Program
   , Await
   , Awaitable(..)
   , await
+  , awaitUpdate
   , Sticky
   , sticky
   , awaitSticky
@@ -279,7 +282,7 @@ data Sticky msg a where
   StickyAp :: Sticky msg (a -> b) -> Sticky msg a -> Sticky msg b
 
 instance Functor (Sticky msg) where
-  fmap f s = pure f <*> s
+  fmap f s = f <$> s
 
 instance Applicative (Sticky msg) where
   pure = StickyPure
@@ -472,8 +475,8 @@ data BatchRun c msg a = BatchRun
   !Int
   !(V.Vector Any -> Int -> (a, Int))
 
-data Batch c msg a = Batch
-  !(DTime -> Inbox msg -> Locals c msg -> BatchRun c msg a)
+newtype Batch c msg a = Batch
+  (DTime -> Inbox msg -> Locals c msg -> BatchRun c msg a)
 
 instance Functor (Batch c msg) where
   fmap f (Batch g) =
@@ -544,9 +547,11 @@ batchRun1 req forb g =
   in BatchRun (V.singleton (BatchOp req forb g')) 1 k
 
 each :: forall a c msg. E.Queryable c a => (a -> EntityPatch c) -> Batch c msg ()
-each f =
-  let q = E.query @a
-      E.Query runQ info = q
+each = eachQ (E.query @a)
+
+eachQ :: forall a c msg. E.Query c a -> (a -> EntityPatch c) -> Batch c msg ()
+eachQ q f =
+  let E.Query runQ info = q
       req = E.requireQ info
       forb = E.forbidQ info
       stepQ e sig bag () =
@@ -594,9 +599,16 @@ eachM :: forall a c msg.
   (a -> EntityM c msg ()) ->
   Batch c msg ()
 {-# INLINE eachM #-}
-eachM f =
-  let q = E.query @a
-      E.Query runQ info = q
+eachM = eachMQ (E.query @a)
+
+eachMQ :: forall a c msg.
+  (HasCallStack, Typeable a) =>
+  E.Query c a ->
+  (a -> EntityM c msg ()) ->
+  Batch c msg ()
+{-# INLINE eachMQ #-}
+eachMQ q f =
+  let E.Query runQ info = q
       req = E.requireQ info
       forb = E.forbidQ info
       runMatch e _ = runQ e
@@ -804,6 +816,9 @@ instance MonadProgram c msg m => AwaitableM c msg m (Sticky msg a) a where
 await :: forall c msg m a b. (MonadProgram c msg m, AwaitableM c msg m a b) => a -> m b
 await = awaitA @c @msg @m @a @b
 
+awaitUpdate :: ProgramM c msg ()
+awaitUpdate = awaitM Update
+
 firstJust :: (a -> Maybe b) -> [a] -> Maybe b
 firstJust f = go
   where
@@ -838,9 +853,7 @@ stickyFeed evs s =
   case s of
     StickyPure _ -> s
     StickyNeed pick ->
-      case firstJust pick evs of
-        Just a -> StickyPure a
-        Nothing -> s
+      maybe s StickyPure (firstJust pick evs)
     StickyAp sf sa ->
       let sf' = stickyFeed evs sf
           sa' = stickyFeed evs sa
@@ -849,7 +862,7 @@ stickyFeed evs s =
           _ -> StickyAp sf' sa'
 
 awaitSticky :: MonadProgram c msg m => Sticky msg a -> m a
-awaitSticky s0 = go s0
+awaitSticky = go
   where
     go s =
       case stickyReady s of
@@ -1018,8 +1031,8 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
         (_, []) -> error "stepRound: unreachable missing run flags"
         (p : ps', f : fs') -> (p, f) : zipProgramRuns ps' fs'
 
-    runProgramsPhase inb doneSet seenSet valuesSet w pairs =
-      go w mempty doneSet seenSet valuesSet False pairs
+    runProgramsPhase inb doneSet seenSet valuesSet w =
+      go w mempty doneSet seenSet valuesSet False
       where
         go wAcc accOut dSet sSet vSet progressed remaining =
           case remaining of
@@ -1088,13 +1101,11 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
 
     runBatchesPhase dTime w pending programs0 runFlags steppedAlready =
       let pendingSorted = pending
-          wStep =
-            if steppedAlready
-              then w
-              else
-                if E.worldHasSteps w
-                  then E.stepWorld dTime w
-                  else w
+          wStep = chooseWStep steppedAlready
+          chooseWStep already
+            | already = w
+            | E.worldHasSteps w = E.stepWorld dTime w
+            | otherwise = w
           stepped1 = True
           compiled = map (compilePending dTime) pendingSorted
           steps =
@@ -1123,7 +1134,7 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
               { bgPid = pid
               , bgLocals = locals
               , bgK = \xs -> unsafeCoerce (fst (k xs 0))
-              , bgCont = \v -> unsafeCoerce (cont (unsafeCoerce v))
+              , bgCont = unsafeCoerce . cont . unsafeCoerce
               }
       in CompiledBatch steps group
 
@@ -1183,23 +1194,23 @@ stepRound d w0 events0 programs toRun done0 seen0 values0 allSet stepped0 =
     splitStepsForChunks steps chunks =
       let chunkCount = length chunks
       in case chunkCount of
-          0 -> []
-          1 -> [steps]
-          _ ->
-            let perStep =
-                  V.map
-                    (\kstep ->
-                      case kstep of
-                        KernelStepStateful pid req forb st stepFn doneFn mergeFn splitFn ->
-                          let states = splitStateAcross splitFn st chunks
-                          in map (\s -> KernelStepStateful pid req forb s stepFn doneFn mergeFn splitFn) states
-                        KernelStepStateless {} ->
-                          replicate chunkCount kstep
-                    )
-                    steps
-                chunkSteps i =
-                  V.generate (V.length steps) (\j -> (V.unsafeIndex perStep j) !! i)
-            in map chunkSteps [0 .. chunkCount - 1]
+        0 -> []
+        1 -> [steps]
+        _ ->
+          let perStep =
+                V.map
+                  (\kstep ->
+                    case kstep of
+                      KernelStepStateful pid req forb st stepFn doneFn mergeFn splitFn ->
+                        let states = splitStateAcross splitFn st chunks
+                        in map (\s -> KernelStepStateful pid req forb s stepFn doneFn mergeFn splitFn) states
+                      KernelStepStateless {} ->
+                        replicate chunkCount kstep
+                  )
+                  steps
+              chunkSteps i =
+                V.generate (V.length steps) (\j -> V.unsafeIndex perStep j !! i)
+          in map chunkSteps [0 .. chunkCount - 1]
 
     mergeChunkSteps stepsByChunk =
       case stepsByChunk of

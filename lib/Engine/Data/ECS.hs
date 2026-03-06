@@ -7,6 +7,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -90,7 +91,7 @@ module Engine.Data.ECS
   ) where
 
 import Control.Applicative (Alternative(..))
-import Control.Monad (foldM, forM_)
+import Control.Monad (foldM, forM_, when)
 import Control.Monad.ST (runST)
 import Data.Bits (bit, complement, countTrailingZeros, finiteBitSize, popCount, (.&.), (.|.), xor)
 import Data.IntMap.Strict (IntMap)
@@ -317,7 +318,7 @@ instance ComponentId c => Semigroup (Bag c) where
 instance ComponentId c => Monoid (Bag c) where
   mempty = emptyBag
 
-data Loc = Loc !Int
+newtype Loc = Loc Int
 
 type LocTable = V.Vector (Maybe Loc)
 
@@ -356,14 +357,14 @@ locLookupWorld eid' w
   | otherwise = entityLocW w V.! eid'
 
 vecUpdate :: Int -> a -> V.Vector a -> V.Vector a
-vecUpdate i x vec = V.modify (\mv -> MV.unsafeWrite mv i x) vec
+vecUpdate i x = V.modify (\mv -> MV.unsafeWrite mv i x)
 {-# INLINE vecUpdate #-}
 
 locInsertKnown :: Int -> Loc -> LocTable -> LocTable
-locInsertKnown i loc locs = vecUpdate i (Just loc) locs
+locInsertKnown i = vecUpdate i . Just
 
 locDeleteKnown :: Int -> LocTable -> LocTable
-locDeleteKnown i locs = vecUpdate i Nothing locs
+locDeleteKnown i = vecUpdate i Nothing
 
 locAppend :: Loc -> LocTable -> LocTable
 locAppend loc locs = V.snoc locs (Just loc)
@@ -787,49 +788,40 @@ bagApplyEdit edit bag0 =
 
 hasStructuralEdit :: Sig -> [BagOp] -> Bool
 {-# INLINE hasStructuralEdit #-}
-hasStructuralEdit mask0 =
-  go mask0
+hasStructuralEdit =
+  go
   where
     go !_ [] = False
     go !mask (op : ops) =
       case op of
         BagOpSet bitIx _ ->
-          if maskHas mask bitIx
-            then go mask ops
-            else True
+          not (maskHas mask bitIx) || go mask ops
         BagOpUpdate _ _ -> go mask ops
         BagOpDel bitIx ->
-          if maskHas mask bitIx
-            then True
-            else go mask ops
+          maskHas mask bitIx || go mask ops
 
 applyNonStructuralOps :: Sig -> V.Vector Any -> [BagOp] -> V.Vector Any
 {-# INLINE applyNonStructuralOps #-}
 applyNonStructuralOps mask vals ops =
   V.modify
     (\mv ->
-      forM_ ops $ \op ->
-        case op of
-          BagOpSet bitIx vAny ->
-            if maskHas mask bitIx
-              then do
-                let i = staticIndex mask bitIx
-                old <- MV.unsafeRead mv i
-                if ptrEq old vAny
-                  then pure ()
-                  else MV.unsafeWrite mv i vAny
-              else pure ()
-          BagOpUpdate bitIx fAny ->
-            if maskHas mask bitIx
-              then do
-                let i = staticIndex mask bitIx
-                cur <- MV.unsafeRead mv i
-                let cur' = fAny cur
-                if ptrEq cur cur'
-                  then pure ()
-                  else MV.unsafeWrite mv i cur'
-              else pure ()
-          BagOpDel _ -> pure ()
+      forM_ ops $ \case
+        BagOpSet bitIx vAny ->
+          when (maskHas mask bitIx) $ do
+            let i = staticIndex mask bitIx
+            old <- MV.unsafeRead mv i
+            if ptrEq old vAny
+              then pure ()
+              else MV.unsafeWrite mv i vAny
+        BagOpUpdate bitIx fAny ->
+          when (maskHas mask bitIx) $ do
+            let i = staticIndex mask bitIx
+            cur <- MV.unsafeRead mv i
+            let cur' = fAny cur
+            if ptrEq cur cur'
+              then pure ()
+              else MV.unsafeWrite mv i cur'
+        BagOpDel _ -> pure ()
     )
     vals
 
@@ -859,15 +851,14 @@ bagApplyEditPacked edit bag0@(Bag mask0 vals0) =
                   MV.unsafeWrite mv bitIx (Just vAny)
                   fillExisting mask' (i + 1)
         fillExisting mask0 0
-        forM_ ops $ \op ->
-          case op of
-            BagOpSet bitIx vAny -> MV.unsafeWrite mv bitIx (Just vAny)
-            BagOpUpdate bitIx fAny -> do
-              cur <- MV.unsafeRead mv bitIx
-              case cur of
-                Nothing -> pure ()
-                Just vAny -> MV.unsafeWrite mv bitIx (Just (fAny vAny))
-            BagOpDel bitIx -> MV.unsafeWrite mv bitIx Nothing
+        forM_ ops $ \case
+          BagOpSet bitIx vAny -> MV.unsafeWrite mv bitIx (Just vAny)
+          BagOpUpdate bitIx fAny -> do
+            cur <- MV.unsafeRead mv bitIx
+            case cur of
+              Nothing -> pure ()
+              Just vAny -> MV.unsafeWrite mv bitIx (Just (fAny vAny))
+          BagOpDel bitIx -> MV.unsafeWrite mv bitIx Nothing
         let buildMask !i !mask !count
               | i >= maxBits = pure (mask, count)
               | otherwise = do

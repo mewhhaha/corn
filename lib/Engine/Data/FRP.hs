@@ -60,7 +60,7 @@ instance Functor Tween where
   fmap f (Tween g) = Tween (f . g)
 
 instance Applicative Tween where
-  pure x = Tween (\_ -> x)
+  pure = Tween . const
   Tween f <*> Tween g = Tween (\t -> f t (g t))
 
 instance Monad Tween where
@@ -122,13 +122,13 @@ during :: (Time, Time) -> Step a Bool
 during (t0, t1) = duringSpan (Span t0 t1)
 
 duringSpan :: Span -> Step a Bool
-duringSpan sp = fmap (\t -> inSpan sp t) time
+duringSpan sp = fmap (inSpan sp) time
 
 within :: (Time, Time) -> Step a (Events b) -> Step a (Events b)
 within rng evs = gate . ((,) <$> during rng <*> evs)
 
 range :: (Time, Time) -> Step a (Maybe Double)
-range (t0, t1) = fmap (rangeSpan (Span t0 t1)) time
+range rng = fmap (rangeSpan (uncurry Span rng)) time
 
 rangeSpan :: Span -> Time -> Maybe Double
 rangeSpan (Span t0 t1) t
@@ -137,10 +137,10 @@ rangeSpan (Span t0 t1) t
   | otherwise = Just ((t - t0) / (t1 - t0))
 
 window :: (Time, Time) -> Step a b -> Step a (Maybe b)
-window rng s0 = windowSpan (Span (fst rng) (snd rng)) s0
+window rng = windowSpan (uncurry Span rng)
 
 windowSpan :: Span -> Step a b -> Step a (Maybe b)
-windowSpan sp s0 = go (duringSpan sp) s0
+windowSpan sp = go (duringSpan sp)
   where
     go okS s = Step $ \d a ->
       let (ok, okS') = stepS okS d a
@@ -171,7 +171,7 @@ sample :: Tween a -> Step b a
 sample (Tween f) = fmap f time
 
 since :: Step a (Events ()) -> Step a Double
-since start = go 0 start
+since = go 0
   where
     go elapsed s = Step $ \d a ->
       let (evs, s') = stepS s d a
@@ -196,7 +196,7 @@ afterFrom start t = go 0 start
     go elapsed s = Step $ \d a ->
       let (evs, s') = stepS s d a
           elapsed' = if null evs then elapsed + realToFrac d else 0
-          out = if elapsed' >= t && null evs then [()] else []
+          out = [() | elapsed' >= t && null evs]
       in (out, go elapsed' s')
 
 inSpan :: Span -> Time -> Bool
@@ -222,7 +222,7 @@ edge = go Nothing
     go prev = Step $ \_ a ->
       let evs = case prev of
             Nothing -> [a]
-            Just p -> if p /= a then [a] else []
+            Just p -> [a | p /= a]
       in (evs, go (Just a))
 
 gate :: Step (Bool, Events a) (Events a)

@@ -16,7 +16,7 @@ module Engine.Data.Input
 
 import Engine.Data.FRP (Events, Step(..))
 
-data Button = Button String
+newtype Button = Button String
   deriving (Eq, Ord, Show)
 
 data Input = Input
@@ -65,11 +65,11 @@ instance Monoid Input where
 
 press :: Button -> Step Input (Events ())
 press b = Step $ \_ i ->
-  (if b `elem` down i then [()] else [], press b)
+  ([() | b `elem` down i], press b)
 
 release :: Button -> Step Input (Events ())
 release b = Step $ \_ i ->
-  (if b `elem` up i then [()] else [], release b)
+  ([() | b `elem` up i], release b)
 
 held :: Button -> Step Input Bool
 held b = Step $ \_ i ->
@@ -85,7 +85,7 @@ lookupAxis name ((k, v) : xs) =
   if name == k then v else lookupAxis name xs
 
 mergeAxes :: [(String, Double)] -> [(String, Double)] -> [(String, Double)]
-mergeAxes xs ys = foldl' add xs ys
+mergeAxes = foldl' add
   where
     add acc (k, v) =
       let (found, rest) = extract k acc

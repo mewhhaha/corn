@@ -41,7 +41,8 @@ Runnable genre concepts live under `examples/`:
 
 ```sh
 cd examples
-cabal run corn-examples -- all
+cabal run corn-examples
+cabal run corn-examples -- survivor-sim
 cabal run corn-examples -- scenes-navigation
 ```
 

@@ -139,8 +139,8 @@ sceneBranchAt ::
   Scene.SceneRuntime c msg ->
   [RouteTree c msg String] ->
   Either String (RouteTree c msg String)
-sceneBranchAt patternText sceneRt children =
-  routeBranchAt @() @() patternText (\() () -> sceneRt) children
+sceneBranchAt patternText sceneRt =
+  routeBranchAt @() @() patternText (\() () -> sceneRt)
 
 sceneLeafAt ::
   String ->
@@ -162,7 +162,7 @@ anyRouteMeta anyRoute =
       SomeMeta (meta routeEntry)
 
 flattenTree :: [RouteTree c msg sid] -> [AnyRoute c msg sid]
-flattenTree roots = concatMap go roots
+flattenTree = concatMap go
   where
     go treeNode =
       treeRoute treeNode : flattenTree (treeChildren treeNode)
@@ -637,9 +637,7 @@ knownRouteLeafSegments router =
     RNil -> Set.empty
     routeDef :> rest ->
       let leafSet =
-            case routeLeafSegment routeDef of
-              Nothing -> Set.empty
-              Just sid -> Set.singleton sid
+            maybe Set.empty Set.singleton (routeLeafSegment routeDef)
       in Set.union leafSet (knownRouteLeafSegments rest)
 
 resolvedRouteSegments :: Ord sid => Router sid routes -> Meta sid search url -> [sid]
@@ -697,15 +695,13 @@ matchRoute routeDef router loc =
   let expectedSegments = resolvedRouteSegments router routeDef
   in
     if Scene.locationSegments loc /= expectedSegments
+      || not (sameKeys (routeSearchParamKeys routeDef) (Scene.locationSearchParams loc))
+      || not (sameKeys (routeUrlParamKeys routeDef) (Scene.locationUrlParams loc))
       then Nothing
-      else
-        if not (sameKeys (routeSearchParamKeys routeDef) (Scene.locationSearchParams loc))
-            || not (sameKeys (routeUrlParamKeys routeDef) (Scene.locationUrlParams loc))
-          then Nothing
-          else do
-            searchParams <- decodeSearchCodec (Scene.locationSearchParams loc)
-            urlParams <- decodeUrlCodec (Scene.locationUrlParams loc)
-            pure (searchParams, urlParams)
+      else do
+        searchParams <- decodeSearchCodec (Scene.locationSearchParams loc)
+        urlParams <- decodeUrlCodec (Scene.locationUrlParams loc)
+        pure (searchParams, urlParams)
 
 currentRoute ::
   (Eq sid, Ord sid, SearchCodec search, UrlCodec url) =>

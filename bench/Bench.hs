@@ -11,13 +11,12 @@ import Data.Bits (bit, (.|.))
 import Data.List (foldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Foldable as Foldable
-import qualified Engine.Corn as Corn
+import qualified Engine.Corn as S
+import qualified Engine.Corn.App as RouteS
+import qualified Engine.Corn.App.Path as Path
+import qualified Engine.Corn.FRP as F
+import qualified Engine.Corn.World as E
 import GHC.Generics (Generic)
-import qualified Engine.Data.ECS as E
-import qualified Engine.Data.FRP as F
-import qualified Engine.Data.Program as S
-import qualified Engine.Data.Router as RouteS
-import qualified Engine.Data.Scene as Scene
 
 data Pos = Pos {-# UNPACK #-} !Double {-# UNPACK #-} !Double
   deriving (Eq, Show)
@@ -28,7 +27,7 @@ data Vel = Vel {-# UNPACK #-} !Double {-# UNPACK #-} !Double
 data Acc = Acc {-# UNPACK #-} !Double {-# UNPACK #-} !Double
   deriving (Eq, Show)
 
-data Hp = Hp Int
+newtype Hp = Hp Int
   deriving (Eq, Show)
 
 data UiMsg
@@ -52,7 +51,7 @@ type ProgramM msg a = S.ProgramM C msg a
 
 type Graph msg = S.Graph C msg
 
-data BenchSearch = BenchSearch
+newtype BenchSearch = BenchSearch
   { tab :: [String]
   } deriving (Eq, Show, Generic, RouteS.SearchCodec)
 
@@ -191,18 +190,16 @@ advanceVampirePlayer :: Double -> Pos -> Vel -> (Pos, Vel)
 advanceVampirePlayer dt (Pos x y) (Vel vx vy) =
   let x1 = x + vx * dt
       y1 = y + vy * dt
-      (vx', x2) =
-        if x1 > vampireFieldHalfW
-          then (-abs vx, vampireFieldHalfW)
-          else if x1 < -vampireFieldHalfW
-            then (abs vx, -vampireFieldHalfW)
-            else (vx, x1)
-      (vy', y2) =
-        if y1 > vampireFieldHalfH
-          then (-abs vy, vampireFieldHalfH)
-          else if y1 < -vampireFieldHalfH
-            then (abs vy, -vampireFieldHalfH)
-            else (vy, y1)
+      (vx', x2) = clampX x1 vx
+      (vy', y2) = clampY y1 vy
+      clampX pos v
+        | pos > vampireFieldHalfW = (-abs v, vampireFieldHalfW)
+        | pos < -vampireFieldHalfW = (abs v, -vampireFieldHalfW)
+        | otherwise = (v, pos)
+      clampY pos v
+        | pos > vampireFieldHalfH = (-abs v, vampireFieldHalfH)
+        | pos < -vampireFieldHalfH = (abs v, -vampireFieldHalfH)
+        | otherwise = (v, pos)
   in (Pos x2 y2, Vel vx' vy')
 
 advanceVampireMob :: Double -> Pos -> Vel -> Acc -> Pos -> Hp -> (Pos, Vel, Hp)
@@ -255,40 +252,32 @@ pongProg = do
     S.eachM @BallInfo $ \(BallInfo (Pos x y) (Vel vx vy) _ _) -> do
       let x1 = x + vx * dt
           y1 = y + vy * dt
-          (vyWall, yWall) =
-            if y1 > pongFieldHalfH - pongBallRadius
-              then (-abs vy, pongFieldHalfH - pongBallRadius)
-              else if y1 < -pongFieldHalfH + pongBallRadius
-                then (abs vy, -pongFieldHalfH + pongBallRadius)
-                else (vy, y1)
+          (vyWall, yWall) = clampWall y1 vy
           hitLeft = x1 <= (-pongPaddleX + pongBallRadius)
             && abs (yWall - leftY) <= pongPaddleHalf
           hitRight = x1 >= (pongPaddleX - pongBallRadius)
             && abs (yWall - rightY) <= pongPaddleHalf
-          vxP =
-            if hitLeft
-              then abs vx
-              else if hitRight
-                then -abs vx
-                else vx
-          vyP =
-            if hitLeft
-              then vyWall + leftVy * 0.2
-              else if hitRight
-                then vyWall + rightVy * 0.2
-                else vyWall
-          xP =
-            if hitLeft
-              then -pongPaddleX + pongBallRadius
-              else if hitRight
-                then pongPaddleX - pongBallRadius
-                else x1
-          (vx2, x2) =
-            if xP > pongFieldHalfW - pongBallRadius
-              then (-abs vxP, pongFieldHalfW - pongBallRadius)
-              else if xP < -pongFieldHalfW + pongBallRadius
-                then (abs vxP, -pongFieldHalfW + pongBallRadius)
-                else (vxP, xP)
+          vxP
+            | hitLeft = abs vx
+            | hitRight = -abs vx
+            | otherwise = vx
+          vyP
+            | hitLeft = vyWall + leftVy * 0.2
+            | hitRight = vyWall + rightVy * 0.2
+            | otherwise = vyWall
+          xP
+            | hitLeft = -pongPaddleX + pongBallRadius
+            | hitRight = pongPaddleX - pongBallRadius
+            | otherwise = x1
+          (vx2, x2) = clampXWall xP vxP
+          clampWall pos v
+            | pos > pongFieldHalfH - pongBallRadius = (-abs v, pongFieldHalfH - pongBallRadius)
+            | pos < -pongFieldHalfH + pongBallRadius = (abs v, -pongFieldHalfH + pongBallRadius)
+            | otherwise = (v, pos)
+          clampXWall pos v
+            | pos > pongFieldHalfW - pongBallRadius = (-abs v, pongFieldHalfW - pongBallRadius)
+            | pos < -pongFieldHalfW + pongBallRadius = (abs v, -pongFieldHalfW + pongBallRadius)
+            | otherwise = (v, pos)
       S.edit (S.set (Pos x2 yWall) <> S.set (Vel vx2 vyP))
   pure ()
 
@@ -392,40 +381,40 @@ runSwitchBurst n =
   in out
 
 runSceneHistoryNavCycle :: Int -> Int
-runSceneHistoryNavCycle iters = go iters (Scene.historyFrom [SceneRoot]) 0
+runSceneHistoryNavCycle iters = go iters (Path.historyFrom [SceneRoot]) 0
   where
     go n h acc =
       if n <= 0
         then acc
         else
-          let h1 = Scene.gotoSegment Scene.Push SceneMenu h
-              h2 = Scene.gotoSegment Scene.Push SceneOptions h1
-              h3 = Scene.back h2
-              h4 = Scene.back h3
-              h5 = Scene.forward h4
+          let h1 = Path.gotoSegment Path.Push SceneMenu h
+              h2 = Path.gotoSegment Path.Push SceneOptions h1
+              h3 = Path.back h2
+              h4 = Path.back h3
+              h5 = Path.forward h4
               score =
-                length (Scene.locationSegments (Scene.current h5))
-                  + if Scene.canGoBack h5 then 1 else 0
-                  + if Scene.canGoForward h5 then 1 else 0
+                length (Path.pathSegments (Path.current h5))
+                  + if Path.canGoBack h5 then 1 else 0
+                  + if Path.canGoForward h5 then 1 else 0
           in go (n - 1) h5 (acc + score)
 
 runScenePathGotoCycle :: Int -> Int
-runScenePathGotoCycle iters = go iters (Scene.history @'["/root"]) 0
+runScenePathGotoCycle iters = go iters (Path.history @'["/root"]) 0
   where
     go n h acc =
       if n <= 0
         then acc
         else
-          let h1 = Scene.goto Scene.Replace @"/menu" h
-              h2 = Scene.goto Scene.Replace @"/options" h1
-              h3 = Scene.goto Scene.Replace @"/menu" h2
-              segScore = length (Scene.locationSegments (Scene.current h3))
+          let h1 = Path.goto @"/menu" Path.Replace h
+              h2 = Path.goto @"/options" Path.Replace h1
+              h3 = Path.goto @"/menu" Path.Replace h2
+              segScore = length (Path.pathSegments (Path.current h3))
           in go (n - 1) h3 (acc + segScore)
 
 runtimeBenchRoutes :: RouteS.Routes Int UiMsg UiMsg '[ "/layout", "/layout/items/{:id}" ]
 runtimeBenchRoutes =
-  RouteS.node
-    ( RouteS.route
+  RouteS.stack
+    ( RouteS.layer
         @"/layout"
         (\_ () -> 0)
         (\_ _ _ n ->
@@ -435,7 +424,7 @@ runtimeBenchRoutes =
         (Just ())
     )
     ( RouteS.leaf
-        ( RouteS.route
+        ( RouteS.layer
             @"/layout/items/{:id}"
             (\params (BenchSearch tabs) ->
               let item = RouteS.param @"id" params
@@ -469,7 +458,7 @@ runSceneSimpleRouterEnter iters =
               rt3 = RouteS.navigate RouteS.Back rt2
               (rt4, out2, _) = RouteS.step 0.016 [] rt3
               score =
-                length (Scene.locationSegments (RouteS.current rt4))
+                length (Path.pathSegments (RouteS.current rt4))
                   + length out1
                   + length out2
           in go (n - 1) rt4 (acc + score)
@@ -490,31 +479,12 @@ runSceneRouterRuntimeStep iters =
               rt4 = RouteS.navigate RouteS.Back rt3
               (rt5, out3, _) = RouteS.step 0.016 [] rt4
               score =
-                length (Scene.locationSegments (RouteS.current rt5))
+                length (Path.pathSegments (RouteS.current rt5))
                   + length out1
                   + length out2
                   + length out3
                   + if RouteS.canGoForward rt5 then 1 else 0
           in go (n - 1) rt5 (acc + score)
-
-data CornBenchRoute
-  = CornBenchMenu
-  | CornBenchOptions
-  | CornBenchGame
-  deriving (Eq, Show)
-
-instance Corn.RouteCodec CornBenchRoute where
-  encodeRoute routeId =
-    case routeId of
-      CornBenchMenu -> "/main-menu"
-      CornBenchOptions -> "/main-menu/options"
-      CornBenchGame -> "/game"
-  decodeRoute routeText =
-    case routeText of
-      "/main-menu" -> Just CornBenchMenu
-      "/main-menu/options" -> Just CornBenchOptions
-      "/game" -> Just CornBenchGame
-      _ -> Nothing
 
 data CornBenchMsg
   = CornOpen
@@ -529,55 +499,71 @@ data CornBenchModel = CornBenchModel
   , cornBenchGameTicks :: !Int
   } deriving (Eq, Show)
 
-cornBenchScene :: CornBenchRoute -> Corn.Layer CornBenchModel CornBenchRoute CornBenchMsg
-cornBenchScene routeId =
-  case routeId of
-    CornBenchMenu ->
-      Corn.layer $ \_ inbox model0 ->
-        let model1 = model0 {cornBenchMenuTicks = cornBenchMenuTicks model0 + 1}
-            cmds =
-              [Corn.Navigate (Corn.Push CornBenchOptions) | CornOpen `elem` inbox]
-                <> [Corn.Navigate (Corn.Push CornBenchGame) | CornStart `elem` inbox]
-        in (model1, cmds)
-    CornBenchOptions ->
-      Corn.layer $ \_ inbox model0 ->
-        let model1 = model0 {cornBenchOptionsTicks = cornBenchOptionsTicks model0 + 1}
-            cmds = [Corn.Navigate Corn.Back | CornClose `elem` inbox]
-        in (model1, cmds)
-    CornBenchGame ->
-      Corn.layer $ \_ inbox model0 ->
-        let model1 = model0 {cornBenchGameTicks = cornBenchGameTicks model0 + 1}
-            cmds = [Corn.Navigate Corn.Back | CornBack `elem` inbox]
-        in (model1, cmds)
+cornBenchMenuScene :: RouteS.Layer "/main-menu" CornBenchModel CornBenchMsg Int ()
+cornBenchMenuScene =
+  RouteS.layer
+    (const (const (CornBenchModel 0 0 0)))
+    (\_ _ inbox model0 ->
+      let model1 = model0 {cornBenchMenuTicks = cornBenchMenuTicks model0 + 1}
+          cmds =
+            [RouteS.Push "/main-menu/options" | CornOpen `elem` inbox]
+              <> [RouteS.Push "/game" | CornStart `elem` inbox]
+      in (model1, [1], cmds)
+    )
+    (Just ())
+
+cornBenchOptionsScene :: RouteS.Layer "/main-menu/options" CornBenchModel CornBenchMsg Int ()
+cornBenchOptionsScene =
+  RouteS.layer
+    (const (const (CornBenchModel 0 0 0)))
+    (\_ _ inbox model0 ->
+      let model1 = model0 {cornBenchOptionsTicks = cornBenchOptionsTicks model0 + 1}
+          cmds = [RouteS.Back | CornClose `elem` inbox]
+      in (model1, [1], cmds)
+    )
+    (Just ())
+
+cornBenchGameScene :: RouteS.Layer "/game" CornBenchModel CornBenchMsg Int ()
+cornBenchGameScene =
+  RouteS.layer
+    (const (const (CornBenchModel 0 0 0)))
+    (\_ _ inbox model0 ->
+      let model1 = model0 {cornBenchGameTicks = cornBenchGameTicks model0 + 1}
+          cmds = [RouteS.Back | CornBack `elem` inbox]
+      in (model1, [1], cmds)
+    )
+    (Just ())
+
+cornBenchRoutes :: RouteS.Routes CornBenchModel CornBenchMsg Int '[ "/main-menu", "/main-menu/options", "/game" ]
+cornBenchRoutes =
+  RouteS.leaf cornBenchMenuScene
+    RouteS.:> RouteS.leaf cornBenchOptionsScene
+    RouteS.:> RouteS.leaf cornBenchGameScene
+    RouteS.:> RouteS.EmptyRoutes
 
 runSceneCornSimpleStep :: Int -> Int
 runSceneCornSimpleStep iters =
-  go
-    iters
-    ( Corn.start $
-        Corn.game
-          CornBenchMenu
-          (CornBenchModel 0 0 0)
-          cornBenchScene
-    )
-    0
+  case RouteS.create cornBenchRoutes "/main-menu" of
+    Left _ -> 0
+    Right rt0 ->
+      go iters rt0 0
   where
     go n rt acc =
       if n <= 0
         then acc
         else
-          let (rt1, _) = Corn.step 0.016 [CornOpen] rt
-              (rt2, _) = Corn.step 0.016 [CornClose] rt1
-              (rt3, _) = Corn.step 0.016 [CornStart] rt2
-              (rt4, _) = Corn.step 0.016 [CornBack] rt3
-              m = Corn.model rt4
+          let (rt1, out1, _) = RouteS.step 0.016 [CornOpen] rt
+              (rt2, out2, _) = RouteS.step 0.016 [CornClose] rt1
+              (rt3, out3, _) = RouteS.step 0.016 [CornStart] rt2
+              (rt4, out4, _) = RouteS.step 0.016 [CornBack] rt3
               score =
-                length (Corn.currentPath rt4)
-                  + if Corn.canGoBack rt4 then 1 else 0
-                  + if Corn.canGoForward rt4 then 1 else 0
-                  + cornBenchMenuTicks m
-                  + cornBenchOptionsTicks m
-                  + cornBenchGameTicks m
+                length (RouteS.currentPath rt4)
+                  + if RouteS.canGoBack rt4 then 1 else 0
+                  + if RouteS.canGoForward rt4 then 1 else 0
+                  + length out1
+                  + length out2
+                  + length out3
+                  + length out4
           in go (n - 1) rt4 (acc + score)
 
 main :: IO ()
